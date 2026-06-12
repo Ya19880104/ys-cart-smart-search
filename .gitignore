@@ -1,0 +1,4 @@
+/tests/
+*.zip
+*.log
+.DS_Store

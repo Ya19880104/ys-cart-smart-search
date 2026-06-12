@@ -1,0 +1,177 @@
+/**
+ * YS CART 智慧搜尋 — 後台補充樣式（主體靠核心 ysca primitives）。
+ */
+
+.ys-ss-admin {
+	display: grid;
+	gap: 18px;
+}
+
+.ys-ss-card { padding: 20px; }
+
+.ys-ss-card__title {
+	margin: 0 0 10px;
+	font-size: 17px;
+}
+
+.ys-ss-subtitle {
+	margin: 18px 0 8px;
+	font-size: 14px;
+}
+
+.ys-ss-muted {
+	color: var(--ysca-muted, #6b7280);
+	font-size: 13px;
+	margin: 4px 0 10px;
+}
+
+.ys-ss-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px 22px;
+	align-items: center;
+}
+
+.ys-ss-field {
+	display: grid;
+	gap: 4px;
+	font-size: 13px;
+}
+
+.ys-ss-field > span {
+	font-weight: 600;
+	color: var(--ysca-text, #1f2937);
+}
+
+.ys-ss-field input[type="number"] { width: 110px; }
+
+.ys-ss-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 13px;
+}
+
+.ys-ss-kw-add {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.ys-ss-kw-add input { min-width: 240px; }
+
+.ys-ss-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.ys-ss-table th,
+.ys-ss-table td {
+	text-align: left;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--ysca-border, #e5e7eb);
+}
+
+.ys-ss-w90 { width: 90px; }
+
+.ys-ss-kw-edit { width: 100%; }
+.ys-ss-kw-sort { width: 70px; }
+
+.ys-ss-actions {
+	display: flex;
+	gap: 10px;
+	margin-top: 12px;
+}
+
+.ys-ss-danger { color: var(--ysca-danger, #dc2626); }
+
+.ys-ss-savebar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.ys-ss-save-msg { font-size: 13px; color: var(--ysca-muted, #6b7280); }
+
+/* 分析頁 */
+.ys-ss-rangebar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
+.ys-ss-rangebar .is-active {
+	background: var(--ysca-primary, #2563eb);
+	color: #fff;
+	border-color: var(--ysca-primary, #2563eb);
+}
+
+.ys-ss-rangebar__custom {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.ys-ss-kpis {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	gap: 14px;
+}
+
+.ys-ss-kpi {
+	padding: 16px 18px;
+	display: grid;
+	gap: 4px;
+}
+
+.ys-ss-kpi span {
+	font-size: 12px;
+	color: var(--ysca-muted, #6b7280);
+}
+
+.ys-ss-kpi strong { font-size: 24px; }
+
+.ys-ss-trend {
+	display: flex;
+	align-items: flex-end;
+	gap: 3px;
+	height: 160px;
+	padding-top: 6px;
+}
+
+.ys-ss-trend__col {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-end;
+	height: 100%;
+	min-width: 6px;
+}
+
+.ys-ss-trend__bar {
+	width: 100%;
+	max-width: 26px;
+	background: var(--ysca-primary, #2563eb);
+	opacity: 0.85;
+	border-radius: 3px 3px 0 0;
+}
+
+.ys-ss-trend__label {
+	font-size: 10px;
+	color: var(--ysca-muted, #6b7280);
+	margin-top: 4px;
+	white-space: nowrap;
+	transform: scale(0.9);
+}
+
+.ys-ss-trend__col:nth-child(n+2):not(:nth-child(7n+1)) .ys-ss-trend__label { visibility: hidden; }
+
+.ys-ss-twocol {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+	gap: 18px;
+}
