@@ -52,6 +52,39 @@
 
 .ys-ss-submit:hover { opacity: 0.7; }
 
+/* ─── 主題防護 ───
+   佈景主題常用更高權重對 input[type=search] / button[type=submit] 套自家 padding
+   與 palette 底色。在側邊欄等「非 Blocksy 容器」尤其明顯：送出鈕被塗成米色方塊、
+   輸入框右側留白被吃掉導致放大鏡疊到文字。比照核心 .ys-ec-search 的作法，用
+   inputwrap > 子選擇器 + 屬性選擇器提高權重壓過主題（不用 !important），確保智慧
+   搜尋框在任何主題、任何位置（短代碼／側邊欄／彈窗）都是內嵌透明放大鏡。 */
+.ys-ss-inputwrap > .ys-ss-input[type="search"] {
+	padding-right: 44px;
+}
+
+.ys-ss-inputwrap > .ys-ss-submit[type="submit"] {
+	position: absolute;
+	right: 4px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 32px;
+	min-width: 0;
+	height: 32px;
+	min-height: 0;
+	padding: 6px;
+	margin: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: var(--ys-ec-text, #2c3e50);
+}
+
+.ys-ss-inputwrap > .ys-ss-submit[type="submit"]:hover {
+	background: rgba(143, 168, 184, 0.12);
+	color: var(--ys-ec-text, #2c3e50);
+}
+
 /* ─── 面板 ─── */
 .ys-ss-panel {
 	position: absolute;
