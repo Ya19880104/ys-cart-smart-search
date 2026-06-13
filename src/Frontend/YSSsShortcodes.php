@@ -37,6 +37,24 @@ final class YSSsShortcodes {
 		}
 		add_shortcode( 'ys_ec_search', [ self::class, 'render_bar' ] );
 		add_shortcode( 'ys_ec_search_icon', [ self::class, 'render_icon' ] );
+
+		// 接管模式同步接管核心「篩選側邊欄」的搜尋表單（核心 2.52.39+ 提供 filter），
+		// 讓側邊欄與頁首／短代碼一致改用智慧搜尋。核心較舊無此 filter 時自動無效（不影響）。
+		add_filter( 'ys_ec_sidebar_search_form', [ self::class, 'sidebar_search_form' ], 10, 2 );
+	}
+
+	/**
+	 * 側邊欄搜尋表單接管（接管模式開啟時掛上）。
+	 *
+	 * @param string $default        核心預設表單 HTML。
+	 * @param string $current_search 當前搜尋字串（由原生 GET 帶入，智慧框沿用 name=ys_ec_search）。
+	 */
+	public static function sidebar_search_form( string $default, string $current_search ): string {
+		if ( ! YSSmartSearchDetector::has_ys_cart() ) {
+			return $default;
+		}
+		$html = self::render_bar();
+		return '' !== $html ? $html : $default;
 	}
 
 	public static function register_assets(): void {

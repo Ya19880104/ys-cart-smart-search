@@ -3,7 +3,7 @@
  * Plugin Name: YS CART 智慧搜尋
  * Plugin URI: https://yangsheep.com.tw
  * Description: YS CART 站內智慧搜尋：搜尋 Bar／Icon Popup、混合式熱門關鍵字建議、商品為主可混搜文章頁面、完整搜尋分析報表（ADR-058）。
- * Version: 1.2.1
+ * Version: 1.2.2
  * Author: YANGSHEEP DESIGN
  * Author URI: https://yangsheep.com.tw
  * Text Domain: ys-cart-smart-search
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'YS_SMART_SEARCH_VERSION', '1.2.1' );
+define( 'YS_SMART_SEARCH_VERSION', '1.2.2' );
 define( 'YS_SMART_SEARCH_FILE', __FILE__ );
 define( 'YS_SMART_SEARCH_PATH', plugin_dir_path( __FILE__ ) );
 define( 'YS_SMART_SEARCH_URL', plugin_dir_url( __FILE__ ) );
