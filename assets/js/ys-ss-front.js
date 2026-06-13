@@ -272,7 +272,7 @@
 			var q = input.value.trim();
 			if (!q) { return; }
 			recentPush(q);
-			logQuery(q, -1 === 0 ? 0 : (panel.querySelectorAll('.ys-ss-item').length), sourceOf(form));
+			logQuery(q, panel.querySelectorAll('.ys-ss-item').length, sourceOf(form));
 			// 交給原生 GET 導向商店頁
 		});
 
