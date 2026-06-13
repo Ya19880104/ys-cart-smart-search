@@ -20,6 +20,7 @@ final class YSSsMenuBootstrap {
 
 	public const SLUG_SETTINGS  = 'ys-cart-smart-search';
 	public const SLUG_ANALYTICS = 'ys-cart-smart-search-analytics';
+	public const SLUG_HELP      = 'ys-cart-smart-search-help';
 
 	public static function register(): void {
 		add_action( 'admin_menu', [ self::class, 'register_submenus' ], 58 );
@@ -49,17 +50,38 @@ final class YSSsMenuBootstrap {
 			self::SLUG_ANALYTICS,
 			[ YSSsAnalyticsAdmin::class, 'render' ]
 		);
+
+		add_submenu_page(
+			'ys-cart',
+			__( '智慧搜尋說明', 'ys-cart-smart-search' ),
+			__( '智慧搜尋說明', 'ys-cart-smart-search' ),
+			$cap,
+			self::SLUG_HELP,
+			[ YSSsHelpAdmin::class, 'render' ]
+		);
 	}
 
 	/**
+	 * v1.1.0：併入核心「商店設定」群組（key='settings'，filter 在群組建好後執行、
+	 * 可直接 append；user 需求⑤「獨立設定端點，在商店設定內」）。
+	 *
 	 * @param array<string,mixed> $groups
 	 * @return array<string,mixed>
 	 */
 	public static function add_nav_group( array $groups ): array {
+		if ( isset( $groups['settings']['slugs'] ) && is_array( $groups['settings']['slugs'] ) ) {
+			$groups['settings']['slugs'][] = self::SLUG_SETTINGS;
+			$groups['settings']['slugs'][] = self::SLUG_ANALYTICS;
+			$groups['settings']['slugs'][] = self::SLUG_HELP;
+			$groups['settings']['slugs']   = array_values( array_unique( $groups['settings']['slugs'] ) );
+			return $groups;
+		}
+
+		// 核心結構變動時 fallback：自成群組（不消失）。
 		$groups['smart_search'] = [
 			'label' => __( '智慧搜尋', 'ys-cart-smart-search' ),
 			'icon'  => 'dashicons-search',
-			'slugs' => [ self::SLUG_SETTINGS, self::SLUG_ANALYTICS ],
+			'slugs' => [ self::SLUG_SETTINGS, self::SLUG_ANALYTICS, self::SLUG_HELP ],
 		];
 		return $groups;
 	}

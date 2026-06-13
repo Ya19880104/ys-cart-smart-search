@@ -3,7 +3,7 @@
  * Plugin Name: YS CART 智慧搜尋
  * Plugin URI: https://yangsheep.com.tw
  * Description: YS CART 站內智慧搜尋：搜尋 Bar／Icon Popup、混合式熱門關鍵字建議、商品為主可混搜文章頁面、完整搜尋分析報表（ADR-058）。
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: YANGSHEEP DESIGN
  * Author URI: https://yangsheep.com.tw
  * Text Domain: ys-cart-smart-search
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'YS_SMART_SEARCH_VERSION', '1.0.0' );
+define( 'YS_SMART_SEARCH_VERSION', '1.1.0' );
 define( 'YS_SMART_SEARCH_FILE', __FILE__ );
 define( 'YS_SMART_SEARCH_PATH', plugin_dir_path( __FILE__ ) );
 define( 'YS_SMART_SEARCH_URL', plugin_dir_url( __FILE__ ) );
@@ -46,6 +46,22 @@ spl_autoload_register( function ( $class ) {
 		require $file;
 	}
 } );
+
+// YS Plugin Hub Client（更新功能）— 防重複載入：站上其他 YS 外掛可能已載入。
+if ( is_readable( YS_SMART_SEARCH_PATH . 'vendor/autoload.php' ) ) {
+	require_once YS_SMART_SEARCH_PATH . 'vendor/autoload.php';
+}
+
+add_action( 'plugins_loaded', static function (): void {
+	if ( class_exists( '\YangSheep\PluginHubClient\YSPluginHubClient' ) ) {
+		\YangSheep\PluginHubClient\YSPluginHubClient::register( [
+			'slug'        => 'ys-cart-smart-search',
+			'version'     => YS_SMART_SEARCH_VERSION,
+			'plugin_file' => __FILE__,
+			'name'        => 'YS CART 智慧搜尋',
+		] );
+	}
+}, 30 );
 
 // 自有資料表（獨立於核心，缺 YS CART 也可先建好）
 register_activation_hook( __FILE__, [ \YangSheep\SmartSearch\Database\YSSsSchema::class, 'install' ] );

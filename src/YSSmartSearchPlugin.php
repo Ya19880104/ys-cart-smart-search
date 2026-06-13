@@ -74,7 +74,7 @@ final class YSSmartSearchPlugin {
 
 	public static function enqueue_admin_assets( string $hook ): void {
 		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( (string) $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( ! in_array( $page, [ Admin\YSSsMenuBootstrap::SLUG_SETTINGS, Admin\YSSsMenuBootstrap::SLUG_ANALYTICS ], true ) ) {
+		if ( ! in_array( $page, [ Admin\YSSsMenuBootstrap::SLUG_SETTINGS, Admin\YSSsMenuBootstrap::SLUG_ANALYTICS, Admin\YSSsMenuBootstrap::SLUG_HELP ], true ) ) {
 			return;
 		}
 

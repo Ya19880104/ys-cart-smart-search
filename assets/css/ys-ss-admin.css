@@ -175,3 +175,19 @@
 	grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 	gap: 18px;
 }
+
+/* 使用說明頁 */
+.ys-ss-help-list {
+	margin: 6px 0 0 18px;
+	font-size: 13px;
+	line-height: 1.9;
+}
+
+.ys-ss-help-ok { color: var(--ysca-success, #16895f); font-weight: 600; }
+
+.ys-ss-card code {
+	background: var(--ysca-surface-2, #f3f4f6);
+	padding: 2px 7px;
+	border-radius: 5px;
+	font-size: 12.5px;
+}
