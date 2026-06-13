@@ -29,6 +29,8 @@ final class YSSsSettings {
 				'show_image' => true,
 				'show_price' => true,
 				'show_sku'   => false,
+				'fields'     => [ 'name', 'sku', 'slug' ], // B：搜尋比對欄位
+				'exclude'    => '',                         // B：自有排除（ID 或 slug，空白/逗號分隔）
 			],
 			'categories'          => [
 				'enabled'    => true,
@@ -67,7 +69,21 @@ final class YSSsSettings {
 	 */
 	public static function update( array $patch ): array {
 		$merged = array_replace_recursive( self::all(), $patch );
-		$clean  = self::sanitize( $merged );
+
+		// 清單型欄位（數值索引陣列）：array_replace_recursive 會「按索引」合併，
+		// 縮短清單時會殘留舊索引值（例：fields ['name','sku','slug'] + patch ['sku']
+		// → ['sku','sku','slug']）。這些欄位一律以 patch 整段覆寫。
+		if ( array_key_exists( 'group_order', $patch ) ) {
+			$merged['group_order'] = $patch['group_order'];
+		}
+		if ( isset( $patch['products']['fields'] ) ) {
+			$merged['products']['fields'] = $patch['products']['fields'];
+		}
+		if ( isset( $patch['posts']['post_types'] ) ) {
+			$merged['posts']['post_types'] = $patch['posts']['post_types'];
+		}
+
+		$clean = self::sanitize( $merged );
 		update_option( self::OPTION, $clean, false );
 		return $clean;
 	}
@@ -97,11 +113,17 @@ final class YSSsSettings {
 		$out['group_order'] = array_values( array_unique( array_merge( $order, $d['group_order'] ) ) );
 
 		$p = (array) ( $raw['products'] ?? [] );
+		$fields = array_values( array_intersect(
+			array_map( 'sanitize_key', (array) ( $p['fields'] ?? [ 'name', 'sku', 'slug' ] ) ),
+			[ 'name', 'sku', 'slug' ]
+		) );
 		$out['products'] = [
 			'limit'      => max( 1, min( 12, (int) ( $p['limit'] ?? 6 ) ) ),
 			'show_image' => array_key_exists( 'show_image', $p ) ? ! empty( $p['show_image'] ) : true,
 			'show_price' => array_key_exists( 'show_price', $p ) ? ! empty( $p['show_price'] ) : true,
 			'show_sku'   => ! empty( $p['show_sku'] ),
+			'fields'     => $fields ?: [ 'name' ], // 至少保「名稱」避免空條件
+			'exclude'    => mb_substr( trim( (string) ( $p['exclude'] ?? '' ) ), 0, 2000 ),
 		];
 
 		$c = (array) ( $raw['categories'] ?? [] );

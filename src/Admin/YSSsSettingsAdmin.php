@@ -106,6 +106,19 @@ final class YSSsSettingsAdmin {
 					<label class="ys-ss-row"><input type="checkbox" data-ss-key="products.show_sku"<?php echo $check( ! empty( $settings['products']['show_sku'] ) ); ?>><span>SKU</span></label>
 				</div>
 
+				<?php $ys_fields = (array) ( $settings['products']['fields'] ?? [ 'name', 'sku', 'slug' ] ); ?>
+				<div class="ys-ss-grid" id="ys-ss-product-fields">
+					<span class="ys-ss-field"><span><?php esc_html_e( '搜尋比對欄位', 'ys-cart-smart-search' ); ?></span></span>
+					<label class="ys-ss-row"><input type="checkbox" data-ss-product-field="name"<?php echo $check( in_array( 'name', $ys_fields, true ) ); ?>><span><?php esc_html_e( '商品名稱', 'ys-cart-smart-search' ); ?></span></label>
+					<label class="ys-ss-row"><input type="checkbox" data-ss-product-field="sku"<?php echo $check( in_array( 'sku', $ys_fields, true ) ); ?>><span>SKU</span></label>
+					<label class="ys-ss-row"><input type="checkbox" data-ss-product-field="slug"<?php echo $check( in_array( 'slug', $ys_fields, true ) ); ?>><span><?php esc_html_e( '網址代稱（slug）', 'ys-cart-smart-search' ); ?></span></label>
+				</div>
+				<label class="ys-ss-field" style="max-width:520px">
+					<span><?php esc_html_e( '額外排除商品（ID 或 slug，以空白／逗號分隔）', 'ys-cart-smart-search' ); ?></span>
+					<textarea rows="2" data-ss-key="products.exclude" placeholder="123, summer-tee, 456"><?php echo esc_textarea( (string) ( $settings['products']['exclude'] ?? '' ) ); ?></textarea>
+				</label>
+				<p class="ys-ss-muted"><?php esc_html_e( '排除清單會與核心「商店設定 → 搜尋」的排除 ID／slug 合併套用。', 'ys-cart-smart-search' ); ?></p>
+
 				<h3 class="ys-ss-subtitle"><?php esc_html_e( '分類', 'ys-cart-smart-search' ); ?></h3>
 				<div class="ys-ss-grid">
 					<label class="ys-ss-row"><input type="checkbox" data-ss-key="categories.enabled"<?php echo $check( ! empty( $settings['categories']['enabled'] ) ); ?>><span><?php esc_html_e( '啟用', 'ys-cart-smart-search' ); ?></span></label>

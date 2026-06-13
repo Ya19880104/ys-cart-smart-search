@@ -52,6 +52,13 @@
 			});
 			out.posts = out.posts || {};
 			out.posts.post_types = pts;
+			// 商品搜尋欄位多選
+			var pf = [];
+			app.querySelectorAll('[data-ss-product-field]').forEach(function (cb) {
+				if (cb.checked) { pf.push(cb.getAttribute('data-ss-product-field')); }
+			});
+			out.products = out.products || {};
+			out.products.fields = pf;
 			return out;
 		}
 
