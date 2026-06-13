@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.1] - 2026-06-13
+
+### Performance
+
+- **分類結果商品數改為批次查詢**：開啟「顯示商品數」時，分類分組原本對每個分類各發一次
+  `COUNT(*)`（N+1）。改以單一 `GROUP BY category_id` 一次取回所有分類的商品數，
+  搜尋下拉的 DB round-trip 從「分類數 + 1」降為 2。結果完全一致（無對應商品的分類仍為 0）。
+
+### Notes
+
+- 釐清並以註解與測試鎖定：商品搜尋採 `LIKE '%q%'` 子字串比對（與核心 `YSCatalogService` 一致），
+  **刻意不使用 FULLTEXT** —— 本系統面向中文(CJK)商品，MySQL FULLTEXT 預設 parser 不斷中文詞、
+  需 InnoDB ngram 且單字查詢會失配，核心 `ys_ec_products` 表本身亦無 FULLTEXT 索引。若日後要做
+  索引級全文檢索，應於「核心」以 ngram FULLTEXT 統一改造（ADR），不在 addon 端變更核心 schema。
+
 ## [1.2.0] - 2026-06-13
 
 ### Added

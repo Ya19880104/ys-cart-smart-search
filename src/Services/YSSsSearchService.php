@@ -124,6 +124,13 @@ final class YSSsSearchService {
 		$pref  = $wpdb->esc_like( $q ) . '%';
 		$limit = (int) $cfg['limit'];
 
+		// 比對策略：title/sku/slug 以 LIKE '%q%' 子字串比對（與核心 YSCatalogService 一致）。
+		// 刻意「不」用 FULLTEXT —— 本系統面向中文(CJK)商品：MySQL FULLTEXT 預設 parser 不斷中文詞，
+		// 需 InnoDB ngram parser，且單字查詢（如「茶」）會落在 ngram_token_size 之下而失配；
+		// 核心 ys_ec_products 表本身亦無 FULLTEXT 索引。查詢以 status='publish'（idx_status）收斂、
+		// 並以 LIMIT 截斷結果。若日後要做索引級全文檢索，應在「核心」以 ngram FULLTEXT 統一改造（ADR），
+		// 不在 addon 端變更核心 schema。
+
 		// B：搜尋欄位選擇（名稱/SKU/slug 可個別開關，預設全開、至少保名稱）。
 		$fields = is_array( $cfg['fields'] ?? null ) ? array_values( array_intersect( (array) $cfg['fields'], [ 'name', 'sku', 'slug' ] ) ) : [ 'name', 'sku', 'slug' ];
 		if ( ! $fields ) {
@@ -209,20 +216,28 @@ final class YSSsSearchService {
 			$like
 		), ARRAY_A ) ?: [];
 
+		// 商品數（可選）：以單一 GROUP BY 批次取得，取代每列一次 COUNT 的 N+1 查詢。
+		// 沒有對應商品的分類不會出現在結果中，於下方以 `?? 0` 補回（與舊行為一致）。
+		$counts = [];
+		if ( ! empty( $cfg['show_count'] ) && $rows ) {
+			$ids          = array_map( static fn( $r ) => (int) $r['id'], $rows );
+			$pivot        = $wpdb->prefix . 'ys_ec_product_categories';
+			$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+			$count_rows   = $wpdb->get_results( $wpdb->prepare(
+				"SELECT category_id, COUNT(*) AS c FROM {$pivot} WHERE category_id IN ({$placeholders}) GROUP BY category_id", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$ids
+			), ARRAY_A ) ?: [];
+			foreach ( $count_rows as $cr ) {
+				$counts[ (int) $cr['category_id'] ] = (int) $cr['c'];
+			}
+		}
+
 		$items = [];
 		foreach ( $rows as $r ) {
-			$count = 0;
-			if ( ! empty( $cfg['show_count'] ) ) {
-				$pivot = $wpdb->prefix . 'ys_ec_product_categories';
-				$count = (int) $wpdb->get_var( $wpdb->prepare(
-					"SELECT COUNT(*) FROM {$pivot} WHERE category_id = %d",
-					(int) $r['id']
-				) );
-			}
 			$items[] = [
 				'title' => (string) $r['name'],
 				'url'   => YSSmartSearchDetector::category_url( (string) $r['slug'] ),
-				'count' => $count,
+				'count' => $counts[ (int) $r['id'] ] ?? 0,
 			];
 		}
 
