@@ -46,7 +46,7 @@ final class YSSsHelpAdmin {
 						<?php
 						printf(
 							/* translators: %s = analytics page link */
-							esc_html__( '上線後到「%s」看熱門關鍵字與零結果商機。', 'ys-cart-smart-search' ),
+							esc_html__( '上線後到「報表分析 → %s」分頁看熱門關鍵字、每日趨勢與零結果商機。', 'ys-cart-smart-search' ),
 							'<a href="' . esc_url( $analytics_url ) . '">' . esc_html__( '搜尋分析', 'ys-cart-smart-search' ) . '</a>'
 						);
 						?>
@@ -89,6 +89,19 @@ final class YSSsHelpAdmin {
 				<h2 class="ys-ss-card__title">🔁 <?php esc_html_e( '接管核心搜尋', 'ys-cart-smart-search' ); ?></h2>
 				<p class="ys-ss-muted">
 					<?php esc_html_e( '設定頁開啟「接管核心搜尋短代碼」後，既有頁面裡的 [ys_ec_search] 與 [ys_ec_search_icon] 會改由進階搜尋渲染（含建議與分析），不需逐頁改短代碼；關閉開關即還原核心版本。', 'ys-cart-smart-search' ); ?>
+				</p>
+			</div>
+
+			<div class="ysca-card ysca-card--soft ys-ss-card">
+				<h2 class="ys-ss-card__title">📊 <?php esc_html_e( '搜尋分析報表', 'ys-cart-smart-search' ); ?></h2>
+				<p class="ys-ss-muted">
+					<?php esc_html_e( '顧客搜了什麼、哪些詞找不到結果（零結果商機）、每日搜尋趨勢，都整合在核心「報表分析」的「搜尋分析」分頁：KPI 四卡、每日趨勢、熱門關鍵字排行（可一鍵設為手動關鍵字）、零結果排行、CSV 匯出。', 'ys-cart-smart-search' ); ?>
+				</p>
+				<p>
+					<a class="ysca-btn ysca-btn--primary" href="<?php echo esc_url( $analytics_url ); ?>">
+						<span class="dashicons dashicons-chart-bar" aria-hidden="true"></span>
+						<?php esc_html_e( '前往報表分析 → 搜尋分析', 'ys-cart-smart-search' ); ?>
+					</a>
 				</p>
 			</div>
 

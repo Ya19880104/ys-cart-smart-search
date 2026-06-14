@@ -7,6 +7,24 @@
 	gap: 18px;
 }
 
+/* 頁籤面板：堆疊卡片並留間距（設定頁；分析頁不套此 class） */
+.ys-ss-tabpanel {
+	display: grid;
+	gap: 16px;
+}
+
+.ys-ss-tabpanel[hidden] { display: none; }
+
+/* 手動關鍵字新增列（設定頁；其餘欄位/卡片全用核心 ysca 原語） */
+.ys-ss-kw-add {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 12px;
+	max-width: 520px;
+}
+
+.ys-ss-kw-add .ysca-input { flex: 1 1 auto; }
+
 .ys-ss-card { padding: 20px; }
 
 .ys-ss-card__title {
@@ -51,14 +69,6 @@
 	gap: 7px;
 	font-size: 13px;
 }
-
-.ys-ss-kw-add {
-	display: flex;
-	gap: 8px;
-	margin-bottom: 10px;
-}
-
-.ys-ss-kw-add input { min-width: 240px; }
 
 .ys-ss-table {
 	width: 100%;

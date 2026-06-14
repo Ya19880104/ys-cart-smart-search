@@ -39,8 +39,8 @@ final class YSSsMenuBootstrap {
 
 		add_submenu_page(
 			'ys-cart',
-			__( '進階搜尋', 'ys-cart-smart-search' ),
-			__( '進階搜尋', 'ys-cart-smart-search' ),
+			__( '進階搜尋設定', 'ys-cart-smart-search' ),
+			__( '進階搜尋設定', 'ys-cart-smart-search' ),
 			$cap,
 			self::SLUG_SETTINGS,
 			[ YSSsSettingsAdmin::class, 'render' ]
@@ -109,7 +109,7 @@ final class YSSsMenuBootstrap {
 	 * @return array<string,string>
 	 */
 	public static function external_admin_page_labels( array $labels ): array {
-		$labels[ self::SLUG_SETTINGS ] = __( '進階搜尋', 'ys-cart-smart-search' );
+		$labels[ self::SLUG_SETTINGS ] = __( '進階搜尋設定', 'ys-cart-smart-search' );
 		$labels[ self::SLUG_HELP ]     = __( '進階搜尋說明', 'ys-cart-smart-search' );
 		return $labels;
 	}

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.1] - 2026-06-15 — 設定頁改用核心 ysca 設計系統（頁籤式）
+
+### Changed
+
+- **設定頁全面改用核心 YS CART ysca 設計系統**（不再自製 `.ys-ss-*` 樣式）：
+  `ysca-card` / `ysca-section-card` / `ysca-form-grid` / `ysca-field` / `ysca-input` /
+  `ysca-select` / `ysca-switch`，與 YS CART 後台外觀一致。
+- **設定改頁籤式**（4 分頁：前台與接管／搜尋內容／熱門建議／資料與保留），頁籤切換
+  直接用核心 `ys-cart-admin-shell.js` 的 `data-ysca-tabs` 機制（不自寫 tab JS）。
+- 後台選單端點改名「**進階搜尋設定**」（側欄群組仍為「進階搜尋」）。
+- 說明頁新增「**搜尋分析報表**」引導卡（按鈕直達 報表分析 → 搜尋分析）。
+
 ## [1.4.0] - 2026-06-15 — 改名「進階搜尋」＋搜尋分析整合進報表分析
 
 ### Changed
