@@ -29,7 +29,7 @@ final class YSSsPublicController {
 			'callback'            => [ $this, 'query' ],
 			'permission_callback' => '__return_true',
 			'args'                => [
-				'q' => [ 'type' => 'string', 'required' => true ],
+				'q' => [ 'type' => 'string', 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ],
 			],
 		] );
 

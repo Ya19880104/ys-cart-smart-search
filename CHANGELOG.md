@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.4.2] - 2026-06-15 — 工程團隊 review 修正
+
+### Fixed
+
+- **舊核心（< 2.52.44）搜尋分析無入口**（regression）：核心無報表分頁擴充點時，
+  fail-soft 保留獨立「搜尋分析」子選單與側欄入口；核心 2.52.44+ 才走報表分頁。
+- **`ensure_page()` 縱深防禦**：自動建立結果頁僅限有管理權限情境（`manage_options` /
+  `manage_ys_ecommerce`），防 CLI／import／他 addon 寫此 option 時在非預期身分下建立
+  publish 頁面。
+- **側欄「進階搜尋」群組位置穩定化**：改插在核心「商店設定」(settings) 群組之後（自然
+  落在「有聲書」之前，且不依賴有聲書是否安裝；先前無有聲書時會排到最末）。
+- **移除隱藏核心報表工具列的 `<style>` 注入**：改由核心 2.52.45+ 對 addon 報表分頁不
+  渲染日期工具列（不再單方面 hack 隱藏核心 UI；需核心 2.52.45+ 才有乾淨外觀）。
+
+### Performance
+
+- **結果頁 `search_page()` 短 TTL 快取（60 秒）**：避免大型商品表每次結果頁／翻頁重跑
+  `LIKE '%q%'` 全表掃描 + `COUNT(*)`（中文熱門詞命中率高）。鍵含 norm／頁碼／影響結果
+  的設定；分析記錄（`log_page`）另行呼叫、不受快取影響。
+- **結果頁頁碼上限 100**：防病態深分頁產生巨大 `OFFSET`。
+
+### Changed
+
+- `query` REST 端點 args 補 `sanitize_callback`（宣告式 hardening；實際 sanitize 原已
+  在 callback 內，無破口）。
+
+> 已知保留項：`YSSsRateLimiter` 用 transient 計數為「近似」滑動窗（高併發 TOCTOU 可些微
+> 超量，屬 DoS 放大非資料安全）；已由 60/分鐘 + LIKE 僅掃短欄位 + 結果快取多重緩衝，待
+> 有持久 object cache 環境再評估原子化。
+
 ## [1.4.1] - 2026-06-15 — 設定頁改用核心 ysca 設計系統（頁籤式）
 
 ### Changed

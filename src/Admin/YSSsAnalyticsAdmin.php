@@ -48,9 +48,8 @@ final class YSSsAnalyticsAdmin {
 	 * @param string $date_to
 	 */
 	public static function render_body( string $date_from = '', string $date_to = '' ): void {
-		// 在核心報表 tab 內渲染時，隱藏核心日期工具列（本分析自帶區間列）。
-		// 於獨立頁無 .ysca-report-toolbar，規則無副作用。
-		echo '<style>.ysca-page-root--reports .ysca-report-toolbar{display:none}</style>';
+		// 核心 2.52.45+ 對 addon 報表分頁已不渲染核心日期工具列（本分析自帶區間列）；
+		// 無需再注入隱藏樣式。
 		?>
 		<div class="ys-ss-admin ys-ss-analytics-wrap" id="ys-ss-analytics-app">
 

@@ -61,6 +61,12 @@ final class YSSsResultsPage {
 	 * 確保結果頁存在，回傳頁面 ID（0 = 建立失敗）。
 	 */
 	public static function ensure_page(): int {
+		// 縱深防禦：自動建立 publish 頁面僅限有管理權限的情境（正常經設定儲存觸發）。
+		// 防止 CLI/import/他 addon 寫此 option 時，在非預期身分下自動建頁。
+		if ( ! current_user_can( 'manage_options' ) && ! current_user_can( 'manage_ys_ecommerce' ) ) {
+			return 0;
+		}
+
 		$settings = YSSsSettings::all();
 		$pid      = (int) ( $settings['results_page_id'] ?? 0 );
 		if ( self::valid_page_id( $pid ) ) {

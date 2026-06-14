@@ -70,8 +70,21 @@ final class YSSsSearchService {
 	public static function search_page( string $q, int $page = 1 ): array {
 		$settings = YSSsSettings::all();
 		$norm     = YSSsQueryRepository::normalize( $q );
-		$page     = max( 1, $page );
+		$page     = min( max( 1, $page ), 100 ); // 上限防護：避免病態深分頁產生巨大 OFFSET。
 		$per_page = max( 6, (int) ( $settings['products']['page_limit'] ?? 24 ) );
+
+		// 短 TTL 快取：避免大型商品表每次結果頁／翻頁都重跑 LIKE 全表掃描 + COUNT
+		//（中文熱門詞命中率高）。鍵含 norm／頁碼／影響結果的設定；60 秒內視為新鮮。
+		// 分析記錄（log_page）在 YSSsResultsPage 另行呼叫、不受此快取影響。
+		$cache_key = 'ys_ss_sp_' . md5( $norm . '|' . $page . '|' . (string) wp_json_encode( [
+			$settings['group_order'], $settings['products'], $settings['categories'], $settings['posts'],
+		] ) );
+		if ( '' !== $norm ) {
+			$cached = get_transient( $cache_key );
+			if ( is_array( $cached ) ) {
+				return $cached;
+			}
+		}
 
 		$groups         = [];
 		$products_total = 0;
@@ -108,7 +121,7 @@ final class YSSsSearchService {
 			}
 		}
 
-		return [
+		$result = [
 			'q'              => $norm,
 			'products_total' => $products_total,
 			'page'           => $page,
@@ -117,6 +130,11 @@ final class YSSsSearchService {
 			'groups'         => $groups,
 			'content_types'  => $content_types,
 		];
+
+		if ( '' !== $norm ) {
+			set_transient( $cache_key, $result, MINUTE_IN_SECONDS );
+		}
+		return $result;
 	}
 
 	/**
