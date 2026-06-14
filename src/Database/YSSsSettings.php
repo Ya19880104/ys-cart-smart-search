@@ -23,9 +23,12 @@ final class YSSsSettings {
 			'suggest_window_days' => 30,      // 自動統計取樣窗
 			'recent_enabled'      => true,    // 最近搜尋（純 localStorage）
 			'retention_days'      => 180,     // 需求⑤ 預設 180 天
+			'results_mode'        => 'list',  // 送出結果頁：list=商店列表頁(A)／page=獨立混合結果頁(B)
+			'results_page_id'     => 0,       // B 模式：含 [ys_ss_search_results] 的頁面 ID（自動供裝）
 			'group_order'         => [ 'products', 'categories', 'posts' ],
 			'products'            => [
 				'limit'      => 6,
+				'page_limit' => 24,                         // B：獨立結果頁每頁商品數
 				'show_image' => true,
 				'show_price' => true,
 				'show_sku'   => false,
@@ -106,6 +109,10 @@ final class YSSsSettings {
 			$out['retention_days'] = max( 7, min( 3650, $out['retention_days'] ) );
 		}
 
+		$ys_rm                  = (string) ( $raw['results_mode'] ?? 'list' );
+		$out['results_mode']    = in_array( $ys_rm, [ 'list', 'page' ], true ) ? $ys_rm : 'list';
+		$out['results_page_id'] = max( 0, (int) ( $raw['results_page_id'] ?? 0 ) );
+
 		$order = array_values( array_intersect(
 			array_map( 'sanitize_key', (array) ( $raw['group_order'] ?? [] ) ),
 			[ 'products', 'categories', 'posts' ]
@@ -119,6 +126,7 @@ final class YSSsSettings {
 		) );
 		$out['products'] = [
 			'limit'      => max( 1, min( 12, (int) ( $p['limit'] ?? 6 ) ) ),
+			'page_limit' => max( 6, min( 60, (int) ( $p['page_limit'] ?? 24 ) ) ),
 			'show_image' => array_key_exists( 'show_image', $p ) ? ! empty( $p['show_image'] ) : true,
 			'show_price' => array_key_exists( 'show_price', $p ) ? ! empty( $p['show_price'] ) : true,
 			'show_sku'   => ! empty( $p['show_sku'] ),

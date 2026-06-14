@@ -87,6 +87,7 @@ final class YSSsShortcodes {
 			'restUrl'       => esc_url_raw( rest_url( 'ys-ecommerce-headless/v1/smart-search' ) ),
 			'shopUrl'       => YSSmartSearchDetector::shop_url(),
 			'recentEnabled' => ! empty( $settings['recent_enabled'] ),
+			'resultsMode'   => (string) ( $settings['results_mode'] ?? 'list' ),
 			'i18n'          => [
 				'popular'   => __( '熱門搜尋', 'ys-cart-smart-search' ),
 				'recent'    => __( '最近搜尋', 'ys-cart-smart-search' ),
@@ -95,6 +96,27 @@ final class YSSsShortcodes {
 				'searching' => __( '搜尋中…', 'ys-cart-smart-search' ),
 			],
 		] );
+	}
+
+	/**
+	 * 公開的資產載入入口（結果頁短代碼 [ys_ss_search_results] 也需要前台 CSS/JS）。
+	 */
+	public static function ensure_assets(): void {
+		self::enqueue_assets();
+	}
+
+	/**
+	 * 搜尋表單 action：list=商店列表頁(A)；page=獨立混合結果頁(B，無有效頁面時退回商店頁)。
+	 */
+	public static function form_action(): string {
+		$settings = YSSsSettings::all();
+		if ( 'page' === ( $settings['results_mode'] ?? 'list' ) ) {
+			$url = YSSsResultsPage::page_url();
+			if ( '' !== $url ) {
+				return $url;
+			}
+		}
+		return YSSmartSearchDetector::shop_url();
 	}
 
 	/**
@@ -113,7 +135,7 @@ final class YSSsShortcodes {
 		ob_start();
 		?>
 		<form class="ys-ss-form" role="search" method="get"
-			action="<?php echo esc_url( YSSmartSearchDetector::shop_url() ); ?>" data-ys-ss data-ys-ss-source="bar">
+			action="<?php echo esc_url( self::form_action() ); ?>" data-ys-ss data-ys-ss-source="bar">
 			<div class="ys-ss-inputwrap">
 				<input type="search" name="ys_ec_search" class="ys-ss-input"
 					placeholder="<?php echo esc_attr( (string) $atts['placeholder'] ); ?>"
@@ -158,7 +180,7 @@ final class YSSsShortcodes {
 			<div class="ys-ss-popup__content">
 				<button type="button" class="ys-ss-popup__close" data-ys-ss-close aria-label="<?php esc_attr_e( '關閉', 'ys-cart-smart-search' ); ?>">&times;</button>
 				<form class="ys-ss-form" role="search" method="get"
-					action="<?php echo esc_url( YSSmartSearchDetector::shop_url() ); ?>" data-ys-ss data-ys-ss-source="popup">
+					action="<?php echo esc_url( self::form_action() ); ?>" data-ys-ss data-ys-ss-source="popup">
 					<div class="ys-ss-inputwrap">
 						<input type="search" name="ys_ec_search" class="ys-ss-input"
 							placeholder="<?php esc_attr_e( '搜尋商品…', 'ys-cart-smart-search' ); ?>"

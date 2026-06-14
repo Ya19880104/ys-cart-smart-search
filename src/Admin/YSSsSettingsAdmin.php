@@ -10,6 +10,7 @@ namespace YangSheep\SmartSearch\Admin;
 use YangSheep\SmartSearch\Database\YSSsKeywordRepository;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Frontend\YSSsResultsPage;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -47,6 +48,43 @@ final class YSSsSettingsAdmin {
 					<input type="checkbox" data-ss-key="takeover"<?php echo $check( ! empty( $settings['takeover'] ) ); ?>>
 					<span><?php esc_html_e( '接管核心搜尋短代碼（[ys_ec_search] / [ys_ec_search_icon] 改由智慧搜尋渲染；關閉即還原）', 'ys-cart-smart-search' ); ?></span>
 				</label>
+			</div>
+
+			<div class="ysca-card ysca-card--soft ys-ss-card">
+				<h2 class="ys-ss-card__title"><?php esc_html_e( '搜尋結果頁', 'ys-cart-smart-search' ); ?></h2>
+				<p class="ys-ss-muted"><?php esc_html_e( '使用者按下搜尋（送出）後要落到哪裡。即時下拉預覽兩種模式都相同。', 'ys-cart-smart-search' ); ?></p>
+				<div class="ys-ss-grid">
+					<label class="ys-ss-field" style="max-width:520px">
+						<span><?php esc_html_e( '結果模式', 'ys-cart-smart-search' ); ?></span>
+						<select data-ss-key="results_mode">
+							<option value="list"<?php selected( (string) $settings['results_mode'], 'list' ); ?>><?php esc_html_e( '商品列表頁（A）— 落到商店頁，只顯示商品', 'ys-cart-smart-search' ); ?></option>
+							<option value="page"<?php selected( (string) $settings['results_mode'], 'page' ); ?>><?php esc_html_e( '獨立混合結果頁（B）— 商品＋分類＋文章一頁呈現', 'ys-cart-smart-search' ); ?></option>
+						</select>
+					</label>
+					<label class="ys-ss-field" style="max-width:200px">
+						<span><?php esc_html_e( '結果頁每頁商品數', 'ys-cart-smart-search' ); ?></span>
+						<input type="number" min="6" max="60" data-ss-key="products.page_limit" value="<?php echo esc_attr( (string) ( $settings['products']['page_limit'] ?? 24 ) ); ?>">
+					</label>
+				</div>
+				<?php
+				if ( 'page' === (string) $settings['results_mode'] ) :
+					$ys_rp_id    = (int) ( $settings['results_page_id'] ?? 0 );
+					$ys_rp_valid = YSSsResultsPage::valid_page_id( $ys_rp_id );
+					?>
+					<p class="ys-ss-muted">
+						<?php if ( $ys_rp_valid ) : ?>
+							<?php esc_html_e( '結果頁：', 'ys-cart-smart-search' ); ?>
+							<a href="<?php echo esc_url( (string) get_permalink( $ys_rp_id ) ); ?>" target="_blank" rel="noopener"><?php esc_html_e( '前台檢視', 'ys-cart-smart-search' ); ?></a>
+							<?php $ys_rp_edit = get_edit_post_link( $ys_rp_id ); if ( $ys_rp_edit ) : ?>
+								&nbsp;｜&nbsp;<a href="<?php echo esc_url( $ys_rp_edit ); ?>"><?php esc_html_e( '編輯頁面', 'ys-cart-smart-search' ); ?></a>
+							<?php endif; ?>
+						<?php else : ?>
+							<?php esc_html_e( '⚠ 結果頁尚未建立 — 儲存設定後會自動建立一個含 [ys_ss_search_results] 的「搜尋結果」頁。', 'ys-cart-smart-search' ); ?>
+						<?php endif; ?>
+					</p>
+				<?php else : ?>
+					<p class="ys-ss-muted"><?php esc_html_e( '選「獨立混合結果頁」並儲存後，會自動建立含 [ys_ss_search_results] 的頁面；搜尋送出即落到該頁，文章／分類也會一併呈現。', 'ys-cart-smart-search' ); ?></p>
+				<?php endif; ?>
 			</div>
 
 			<div class="ysca-card ysca-card--soft ys-ss-card">

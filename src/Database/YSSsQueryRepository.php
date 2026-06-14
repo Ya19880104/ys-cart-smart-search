@@ -39,10 +39,39 @@ final class YSSsQueryRepository {
 			'results_total' => max( 0, $results_total ),
 			'has_results'   => $results_total > 0 ? 1 : 0,
 			'content_types' => substr( $content_types, 0, 60 ),
-			'source'        => in_array( $source, [ 'bar', 'popup' ], true ) ? $source : 'bar',
+			'source'        => in_array( $source, [ 'bar', 'popup', 'page' ], true ) ? $source : 'bar',
 			'visitor_hash'  => substr( $visitor_hash, 0, 16 ),
 			'created_at'    => current_time( 'mysql' ),
 		] );
+	}
+
+	/**
+	 * 結果頁（B 模式）server 端記錄。對「同訪客 + 同正規化詞」於近 600 秒內已記錄者
+	 * 去重後才寫入（source='page'），避免與下拉 JS /log 雙記、也防結果頁重整／分頁灌水。
+	 */
+	public static function log_page( string $raw, int $results_total, string $content_types, string $visitor_hash ): void {
+		global $wpdb;
+
+		$norm = self::normalize( $raw );
+		if ( '' === $norm ) {
+			return;
+		}
+
+		$table = YSSsSchema::queries_table();
+		$vh    = substr( $visitor_hash, 0, 16 );
+		$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 600 );
+
+		$dup = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT 1 FROM {$table} WHERE visitor_hash = %s AND query_norm = %s AND created_at >= %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$vh,
+			$norm,
+			$since
+		) );
+		if ( $dup ) {
+			return; // 近期已由下拉或本頁記錄過，不重複計數。
+		}
+
+		self::log( $raw, $results_total, $content_types, 'page', $vh );
 	}
 
 	/**

@@ -272,8 +272,11 @@
 			var q = input.value.trim();
 			if (!q) { return; }
 			recentPush(q);
-			logQuery(q, panel.querySelectorAll('.ys-ss-item').length, sourceOf(form));
-			// 交給原生 GET 導向商店頁
+			// page 模式（獨立結果頁）：交由結果頁 server 端記錄，避免與此處雙記。
+			if (CFG.resultsMode !== 'page') {
+				logQuery(q, panel.querySelectorAll('.ys-ss-item').length, sourceOf(form));
+			}
+			// 交給原生 GET 導向結果頁／商店頁
 		});
 
 		// 鍵盤導航

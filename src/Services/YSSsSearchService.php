@@ -63,6 +63,63 @@ final class YSSsSearchService {
 	}
 
 	/**
+	 * 結果頁（B 模式）：商品分頁 + 分類/文章（僅第一頁顯示，因通常筆數少）。
+	 *
+	 * @return array<string,mixed> { q, products_total, page, per_page, total_pages, groups[], content_types[] }
+	 */
+	public static function search_page( string $q, int $page = 1 ): array {
+		$settings = YSSsSettings::all();
+		$norm     = YSSsQueryRepository::normalize( $q );
+		$page     = max( 1, $page );
+		$per_page = max( 6, (int) ( $settings['products']['page_limit'] ?? 24 ) );
+
+		$groups         = [];
+		$products_total = 0;
+		$content_types  = [];
+
+		if ( '' !== $norm ) {
+			foreach ( $settings['group_order'] as $type ) {
+				$group = null;
+
+				if ( 'products' === $type ) {
+					$content_types[] = 'products';
+					$paged           = self::products_group_paged( $norm, $settings['products'], $per_page, ( $page - 1 ) * $per_page );
+					$products_total  = (int) $paged['total_count'];
+					$group           = $paged['group'];
+				} elseif ( 'categories' === $type && ! empty( $settings['categories']['enabled'] ) ) {
+					$content_types[] = 'categories';
+					if ( 1 === $page ) {
+						$cfg          = $settings['categories'];
+						$cfg['limit'] = min( 24, max( (int) $cfg['limit'], 12 ) ); // 結果頁顯示更多
+						$group        = self::categories_group( $norm, $cfg );
+					}
+				} elseif ( 'posts' === $type && ! empty( $settings['posts']['enabled'] ) ) {
+					$content_types[] = 'posts';
+					if ( 1 === $page ) {
+						$cfg          = $settings['posts'];
+						$cfg['limit'] = min( 24, max( (int) $cfg['limit'], 12 ) );
+						$group        = self::posts_group( $norm, $cfg );
+					}
+				}
+
+				if ( $group && $group['items'] ) {
+					$groups[] = $group;
+				}
+			}
+		}
+
+		return [
+			'q'              => $norm,
+			'products_total' => $products_total,
+			'page'           => $page,
+			'per_page'       => $per_page,
+			'total_pages'    => max( 1, (int) ceil( $products_total / $per_page ) ),
+			'groups'         => $groups,
+			'content_types'  => $content_types,
+		];
+	}
+
+	/**
 	 * 蒐集商品排除清單：核心 ys_ec_search_excluded_slugs + ys_ec_search_excluded_ids
 	 *（與核心搜尋一致）＋ 本外掛設定的自有排除（ID 或 slug 混填）。
 	 *
@@ -113,23 +170,21 @@ final class YSSsSearchService {
 	}
 
 	/**
+	 * 組裝商品查詢的 WHERE / ORDER（dropdown 與結果頁共用）。
+	 *
+	 * 比對策略：title/sku/slug 以 LIKE '%q%' 子字串比對（與核心 YSCatalogService 一致）。
+	 * 刻意「不」用 FULLTEXT —— 面向中文(CJK)商品：MySQL FULLTEXT 預設 parser 不斷中文詞，
+	 * 需 InnoDB ngram parser，且單字查詢會落在 ngram_token_size 之下而失配；核心 ys_ec_products
+	 * 表本身亦無 FULLTEXT 索引。若日後要做索引級全文檢索，應在「核心」以 ngram FULLTEXT 統一改造。
+	 *
 	 * @param array<string,mixed> $cfg
-	 * @return array<string,mixed>
+	 * @return array{0:string,1:array<int,mixed>,2:string,3:array<int,mixed>,4:bool} [where, where_args, order, order_args, search_name]
 	 */
-	private static function products_group( string $q, array $cfg ): array {
+	private static function build_products_where( string $q, array $cfg ): array {
 		global $wpdb;
 
-		$table = $wpdb->prefix . 'ys_ec_products';
-		$like  = '%' . $wpdb->esc_like( $q ) . '%';
-		$pref  = $wpdb->esc_like( $q ) . '%';
-		$limit = (int) $cfg['limit'];
-
-		// 比對策略：title/sku/slug 以 LIKE '%q%' 子字串比對（與核心 YSCatalogService 一致）。
-		// 刻意「不」用 FULLTEXT —— 本系統面向中文(CJK)商品：MySQL FULLTEXT 預設 parser 不斷中文詞，
-		// 需 InnoDB ngram parser，且單字查詢（如「茶」）會落在 ngram_token_size 之下而失配；
-		// 核心 ys_ec_products 表本身亦無 FULLTEXT 索引。查詢以 status='publish'（idx_status）收斂、
-		// 並以 LIMIT 截斷結果。若日後要做索引級全文檢索，應在「核心」以 ngram FULLTEXT 統一改造（ADR），
-		// 不在 addon 端變更核心 schema。
+		$like = '%' . $wpdb->esc_like( $q ) . '%';
+		$pref = $wpdb->esc_like( $q ) . '%';
 
 		// B：搜尋欄位選擇（名稱/SKU/slug 可個別開關，預設全開、至少保名稱）。
 		$fields = is_array( $cfg['fields'] ?? null ) ? array_values( array_intersect( (array) $cfg['fields'], [ 'name', 'sku', 'slug' ] ) ) : [ 'name', 'sku', 'slug' ];
@@ -140,9 +195,9 @@ final class YSSsSearchService {
 
 		$field_clauses = [];
 		$field_args    = [];
-		if ( $search_name )                       { $field_clauses[] = 'title LIKE %s'; $field_args[] = $like; }
-		if ( in_array( 'sku', $fields, true ) )   { $field_clauses[] = 'sku LIKE %s';   $field_args[] = $like; }
-		if ( in_array( 'slug', $fields, true ) )  { $field_clauses[] = 'slug LIKE %s';  $field_args[] = $like; }
+		if ( $search_name )                      { $field_clauses[] = 'title LIKE %s'; $field_args[] = $like; }
+		if ( in_array( 'sku', $fields, true ) )  { $field_clauses[] = 'sku LIKE %s';   $field_args[] = $like; }
+		if ( in_array( 'slug', $fields, true ) ) { $field_clauses[] = 'slug LIKE %s';  $field_args[] = $like; }
 
 		// A+B：排除＝核心 excluded_slugs + excluded_ids（與核心一致）＋本外掛自有排除清單。
 		[ $excl_slugs, $excl_ids ] = self::collect_exclusions( $cfg );
@@ -166,37 +221,96 @@ final class YSSsSearchService {
 			$order_args = [ $pref, $like ];
 		}
 
+		return [ $where, $where_args, $order, $order_args, $search_name ];
+	}
+
+	/**
+	 * 商品列 → 前台 item 形狀（dropdown 與結果頁共用）。
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @param array<string,mixed>            $cfg
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function map_product_rows( array $rows, array $cfg ): array {
+		$symbol = YSSmartSearchDetector::currency_symbol();
+		$items  = [];
+		foreach ( $rows as $r ) {
+			$price      = (float) $r['price'];
+			$sale_price = (float) $r['sale_price'];
+			$items[]    = [
+				'title'          => (string) $r['title'],
+				'url'            => YSSmartSearchDetector::product_url( (string) $r['slug'] ),
+				'image'          => ! empty( $cfg['show_image'] ) ? (string) $r['image_url'] : '',
+				'price'          => ! empty( $cfg['show_price'] ) ? $symbol . number_format( $sale_price > 0 && $sale_price < $price ? $sale_price : $price ) : '',
+				'price_original' => ( ! empty( $cfg['show_price'] ) && $sale_price > 0 && $sale_price < $price ) ? $symbol . number_format( $price ) : '',
+				'sku'            => ! empty( $cfg['show_sku'] ) ? (string) $r['sku'] : '',
+			];
+		}
+		return $items;
+	}
+
+	/**
+	 * @param array<string,mixed> $cfg
+	 * @return array<string,mixed>
+	 */
+	private static function products_group( string $q, array $cfg ): array {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'ys_ec_products';
+		$limit = (int) $cfg['limit'];
+		[ $where, $where_args, $order, $order_args ] = self::build_products_where( $q, $cfg );
+
 		$sql  = "SELECT id, title, slug, sku, price, sale_price, image_url
 				FROM {$table}
 				WHERE status = 'publish' AND {$where}
 				ORDER BY {$order}
 				LIMIT " . ( $limit + 1 );
-		$args = array_merge( $where_args, $order_args );
-		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $args ), ARRAY_A ) ?: []; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$rows = $wpdb->get_results( $wpdb->prepare( $sql, array_merge( $where_args, $order_args ) ), ARRAY_A ) ?: []; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
 		$has_more = count( $rows ) > $limit;
 		$rows     = array_slice( $rows, 0, $limit );
-		$symbol   = YSSmartSearchDetector::currency_symbol();
-
-		$items = [];
-		foreach ( $rows as $r ) {
-			$price      = (float) $r['price'];
-			$sale_price = (float) $r['sale_price'];
-			$items[]    = [
-				'title' => (string) $r['title'],
-				'url'   => YSSmartSearchDetector::product_url( (string) $r['slug'] ),
-				'image' => ! empty( $cfg['show_image'] ) ? (string) $r['image_url'] : '',
-				'price' => ! empty( $cfg['show_price'] ) ? $symbol . number_format( $sale_price > 0 && $sale_price < $price ? $sale_price : $price ) : '',
-				'price_original' => ( ! empty( $cfg['show_price'] ) && $sale_price > 0 && $sale_price < $price ) ? $symbol . number_format( $price ) : '',
-				'sku'   => ! empty( $cfg['show_sku'] ) ? (string) $r['sku'] : '',
-			];
-		}
 
 		return [
 			'type'  => 'products',
 			'label' => __( '商品', 'ys-cart-smart-search' ),
-			'total' => count( $items ) + ( $has_more ? 1 : 0 ), // 精確 total 需 COUNT；「+1」僅示意還有更多
-			'items' => $items,
+			'total' => count( $rows ) + ( $has_more ? 1 : 0 ), // 精確 total 需 COUNT；「+1」僅示意還有更多
+			'items' => self::map_product_rows( $rows, $cfg ),
+		];
+	}
+
+	/**
+	 * 結果頁（B 模式）：商品分頁查詢，回傳精確總數（COUNT）＋當頁項目。
+	 *
+	 * @param array<string,mixed> $cfg
+	 * @return array{group:array<string,mixed>,total_count:int}
+	 */
+	private static function products_group_paged( string $q, array $cfg, int $per_page, int $offset ): array {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'ys_ec_products';
+		[ $where, $where_args, $order, $order_args ] = self::build_products_where( $q, $cfg );
+
+		$total_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$table} WHERE status = 'publish' AND {$where}", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$where_args
+		) );
+
+		$sql  = "SELECT id, title, slug, sku, price, sale_price, image_url
+				FROM {$table}
+				WHERE status = 'publish' AND {$where}
+				ORDER BY {$order}
+				LIMIT %d OFFSET %d";
+		$args = array_merge( $where_args, $order_args, [ max( 1, $per_page ), max( 0, $offset ) ] );
+		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $args ), ARRAY_A ) ?: []; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+		return [
+			'group'       => [
+				'type'  => 'products',
+				'label' => __( '商品', 'ys-cart-smart-search' ),
+				'total' => $total_count,
+				'items' => self::map_product_rows( $rows, $cfg ),
+			],
+			'total_count' => $total_count,
 		];
 	}
 

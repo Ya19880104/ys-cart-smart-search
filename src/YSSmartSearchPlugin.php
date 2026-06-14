@@ -44,6 +44,7 @@ final class YSSmartSearchPlugin {
 
 		// 前台
 		Frontend\YSSsShortcodes::register();
+		Frontend\YSSsResultsPage::register();
 
 		// Cron（核心每日 hook）
 		Cron\YSSsCronBridge::register();
