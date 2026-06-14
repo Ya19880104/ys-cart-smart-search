@@ -39,7 +39,7 @@ final class YSSsShortcodes {
 		add_shortcode( 'ys_ec_search_icon', [ self::class, 'render_icon' ] );
 
 		// 接管模式同步接管核心「篩選側邊欄」的搜尋表單（核心 2.52.39+ 提供 filter），
-		// 讓側邊欄與頁首／短代碼一致改用智慧搜尋。核心較舊無此 filter 時自動無效（不影響）。
+		// 讓側邊欄與頁首／短代碼一致改用進階搜尋。核心較舊無此 filter 時自動無效（不影響）。
 		add_filter( 'ys_ec_sidebar_search_form', [ self::class, 'sidebar_search_form' ], 10, 2 );
 	}
 

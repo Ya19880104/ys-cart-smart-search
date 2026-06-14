@@ -170,6 +170,37 @@
 
 .ys-ss-trend__col:nth-child(n+2):not(:nth-child(7n+1)) .ys-ss-trend__label { visibility: hidden; }
 
+/* KPI 配色（四卡各帶語意色：總量/獨立=正向、零結果/零結果率=警示） */
+.ys-ss-kpi {
+	border-left: 4px solid var(--ysca-border, #e5e7eb);
+}
+
+.ys-ss-kpi strong { color: var(--ysca-text, #1f2937); font-variant-numeric: tabular-nums; }
+
+.ys-ss-kpi--total  { border-left-color: var(--ysca-primary, #6b8a9a); }
+.ys-ss-kpi--total strong  { color: var(--ysca-primary, #4f7488); }
+
+.ys-ss-kpi--unique { border-left-color: #7dab8e; }
+.ys-ss-kpi--unique strong { color: #5b8a6e; }
+
+.ys-ss-kpi--zero   { border-left-color: var(--ysca-warning, #c4a67a); }
+.ys-ss-kpi--zero strong   { color: var(--ysca-warning, #a9824f); }
+
+.ys-ss-kpi--rate   { border-left-color: var(--ysca-danger, #c08080); }
+.ys-ss-kpi--rate strong   { color: var(--ysca-danger, #b15c5c); }
+
+/* 趨勢柱：實心主色 + 頂部高光，hover 加深 */
+.ys-ss-trend__bar {
+	opacity: 1;
+	background: linear-gradient(180deg, var(--ysca-primary, #6b8a9a) 0%, var(--ysca-primary-soft, #8fa8b8) 100%);
+	transition: filter 0.15s ease;
+}
+
+.ys-ss-trend__col:hover .ys-ss-trend__bar { filter: saturate(1.2) brightness(0.95); }
+
+/* 報表 tab 內：與分頁標籤留白 */
+.ysca-page-root--reports .ys-ss-analytics-wrap { margin-top: 16px; }
+
 .ys-ss-twocol {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));

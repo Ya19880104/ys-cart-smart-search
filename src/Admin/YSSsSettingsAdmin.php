@@ -24,11 +24,11 @@ final class YSSsSettingsAdmin {
 
 		if ( $has_app ) {
 			\YangSheep\Ecommerce\Admin\YSAdminApp::open(
-				__( '智慧搜尋', 'ys-cart-smart-search' ),
-				__( 'YS CART / 智慧搜尋', 'ys-cart-smart-search' )
+				__( '進階搜尋', 'ys-cart-smart-search' ),
+				__( 'YS CART / 進階搜尋', 'ys-cart-smart-search' )
 			);
 		} else {
-			echo '<div class="wrap"><h1>' . esc_html__( '智慧搜尋', 'ys-cart-smart-search' ) . '</h1>';
+			echo '<div class="wrap"><h1>' . esc_html__( '進階搜尋', 'ys-cart-smart-search' ) . '</h1>';
 		}
 
 		$check = static function ( bool $on ): string {
@@ -46,7 +46,7 @@ final class YSSsSettingsAdmin {
 				</p>
 				<label class="ys-ss-row">
 					<input type="checkbox" data-ss-key="takeover"<?php echo $check( ! empty( $settings['takeover'] ) ); ?>>
-					<span><?php esc_html_e( '接管核心搜尋短代碼（[ys_ec_search] / [ys_ec_search_icon] 改由智慧搜尋渲染；關閉即還原）', 'ys-cart-smart-search' ); ?></span>
+					<span><?php esc_html_e( '接管核心搜尋短代碼（[ys_ec_search] / [ys_ec_search_icon] 改由進階搜尋渲染；關閉即還原）', 'ys-cart-smart-search' ); ?></span>
 				</label>
 			</div>
 

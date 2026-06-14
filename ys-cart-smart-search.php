@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: YS CART 智慧搜尋
+ * Plugin Name: YS CART 進階搜尋
  * Plugin URI: https://yangsheep.com.tw
- * Description: YS CART 站內智慧搜尋：搜尋 Bar／Icon Popup、混合式熱門關鍵字建議、商品為主可混搜文章頁面、完整搜尋分析報表（ADR-058）。
- * Version: 1.3.0
+ * Description: YS CART 站內進階搜尋：搜尋 Bar／Icon Popup、混合式熱門關鍵字建議、商品為主可混搜文章頁面、完整搜尋分析報表（ADR-058）。
+ * Version: 1.4.0
  * Author: YANGSHEEP DESIGN
  * Author URI: https://yangsheep.com.tw
  * Text Domain: ys-cart-smart-search
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'YS_SMART_SEARCH_VERSION', '1.3.0' );
+define( 'YS_SMART_SEARCH_VERSION', '1.4.0' );
 define( 'YS_SMART_SEARCH_FILE', __FILE__ );
 define( 'YS_SMART_SEARCH_PATH', plugin_dir_path( __FILE__ ) );
 define( 'YS_SMART_SEARCH_URL', plugin_dir_url( __FILE__ ) );
@@ -25,7 +25,7 @@ define( 'YS_SMART_SEARCH_URL', plugin_dir_url( __FILE__ ) );
 if ( version_compare( PHP_VERSION, '8.1', '<' ) ) {
 	add_action( 'admin_notices', function () {
 		echo '<div class="notice notice-error"><p>';
-		echo esc_html__( 'YS CART 智慧搜尋需要 PHP 8.1 以上版本。', 'ys-cart-smart-search' );
+		echo esc_html__( 'YS CART 進階搜尋需要 PHP 8.1 以上版本。', 'ys-cart-smart-search' );
 		echo '</p></div>';
 	} );
 	return;
@@ -58,7 +58,7 @@ add_action( 'plugins_loaded', static function (): void {
 			'slug'        => 'ys-cart-smart-search',
 			'version'     => YS_SMART_SEARCH_VERSION,
 			'plugin_file' => __FILE__,
-			'name'        => 'YS CART 智慧搜尋',
+			'name'        => 'YS CART 進階搜尋',
 		] );
 	}
 }, 30 );

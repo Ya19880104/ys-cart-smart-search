@@ -16,15 +16,15 @@ final class YSSsHelpAdmin {
 
 		if ( $has_app ) {
 			\YangSheep\Ecommerce\Admin\YSAdminApp::open(
-				__( '智慧搜尋使用說明', 'ys-cart-smart-search' ),
-				__( 'YS CART / 商店設定 / 智慧搜尋說明', 'ys-cart-smart-search' )
+				__( '進階搜尋使用說明', 'ys-cart-smart-search' ),
+				__( 'YS CART / 進階搜尋 / 使用說明', 'ys-cart-smart-search' )
 			);
 		} else {
-			echo '<div class="wrap"><h1>' . esc_html__( '智慧搜尋使用說明', 'ys-cart-smart-search' ) . '</h1>';
+			echo '<div class="wrap"><h1>' . esc_html__( '進階搜尋使用說明', 'ys-cart-smart-search' ) . '</h1>';
 		}
 
 		$settings_url  = admin_url( 'admin.php?page=' . YSSsMenuBootstrap::SLUG_SETTINGS );
-		$analytics_url = admin_url( 'admin.php?page=' . YSSsMenuBootstrap::SLUG_ANALYTICS );
+		$analytics_url = admin_url( 'admin.php?page=ys-ec-reports&tab=search' );
 		$has_blocksy   = defined( 'YS_CART_BLOCKSY_VERSION' );
 		?>
 		<div class="ys-ss-admin">
@@ -32,13 +32,13 @@ final class YSSsHelpAdmin {
 			<div class="ysca-card ysca-card--soft ys-ss-card">
 				<h2 class="ys-ss-card__title">🚀 <?php esc_html_e( '快速開始', 'ys-cart-smart-search' ); ?></h2>
 				<ol class="ys-ss-help-list">
-					<li><?php esc_html_e( '把搜尋元件放上前台：用下方短代碼，或（建議）用 Blocksy 頁首建構器的智慧搜尋元件。', 'ys-cart-smart-search' ); ?></li>
+					<li><?php esc_html_e( '把搜尋元件放上前台：用下方短代碼，或（建議）用 Blocksy 頁首建構器的進階搜尋元件。', 'ys-cart-smart-search' ); ?></li>
 					<li>
 						<?php
 						printf(
 							/* translators: %s = settings page link */
 							esc_html__( '到「%s」調整熱門搜尋數量、搜尋內容與呈現、資料保留。', 'ys-cart-smart-search' ),
-							'<a href="' . esc_url( $settings_url ) . '">' . esc_html__( '智慧搜尋設定', 'ys-cart-smart-search' ) . '</a>'
+							'<a href="' . esc_url( $settings_url ) . '">' . esc_html__( '進階搜尋設定', 'ys-cart-smart-search' ) . '</a>'
 						);
 						?>
 					</li>
@@ -74,7 +74,7 @@ final class YSSsHelpAdmin {
 			<div class="ysca-card ysca-card--soft ys-ss-card">
 				<h2 class="ys-ss-card__title">🎨 <?php esc_html_e( 'Blocksy 頁首元件', 'ys-cart-smart-search' ); ?></h2>
 				<p class="ys-ss-muted">
-					<?php esc_html_e( '若佈景主題為 Blocksy 並安裝「YS CART Blocksy 整合」外掛（v1.1+），「外觀 → 自訂 → 頁首」會多出兩個元件：「YS 智慧搜尋 Icon」「YS 智慧搜尋框」——拖放即用、尺寸顏色可調。本外掛停用時這兩個元件會自動隱藏。', 'ys-cart-smart-search' ); ?>
+					<?php esc_html_e( '若佈景主題為 Blocksy 並安裝「YS CART Blocksy 整合」外掛（v1.1+），「外觀 → 自訂 → 頁首」會多出兩個元件：「YS 進階搜尋 Icon」「YS 進階搜尋框」——拖放即用、尺寸顏色可調。本外掛停用時這兩個元件會自動隱藏。', 'ys-cart-smart-search' ); ?>
 				</p>
 				<p>
 					<?php if ( $has_blocksy ) : ?>
@@ -88,7 +88,7 @@ final class YSSsHelpAdmin {
 			<div class="ysca-card ysca-card--soft ys-ss-card">
 				<h2 class="ys-ss-card__title">🔁 <?php esc_html_e( '接管核心搜尋', 'ys-cart-smart-search' ); ?></h2>
 				<p class="ys-ss-muted">
-					<?php esc_html_e( '設定頁開啟「接管核心搜尋短代碼」後，既有頁面裡的 [ys_ec_search] 與 [ys_ec_search_icon] 會改由智慧搜尋渲染（含建議與分析），不需逐頁改短代碼；關閉開關即還原核心版本。', 'ys-cart-smart-search' ); ?>
+					<?php esc_html_e( '設定頁開啟「接管核心搜尋短代碼」後，既有頁面裡的 [ys_ec_search] 與 [ys_ec_search_icon] 會改由進階搜尋渲染（含建議與分析），不需逐頁改短代碼；關閉開關即還原核心版本。', 'ys-cart-smart-search' ); ?>
 				</p>
 			</div>
 

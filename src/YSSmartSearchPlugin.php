@@ -69,13 +69,18 @@ final class YSSmartSearchPlugin {
 		}
 
 		echo '<div class="notice notice-warning"><p>';
-		echo esc_html__( 'YS CART 智慧搜尋：尚未偵測到 YS CART 外掛，功能暫停（資料保留）。', 'ys-cart-smart-search' );
+		echo esc_html__( 'YS CART 進階搜尋：尚未偵測到 YS CART 外掛，功能暫停（資料保留）。', 'ys-cart-smart-search' );
 		echo '</p></div>';
 	}
 
 	public static function enqueue_admin_assets( string $hook ): void {
 		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( (string) $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( ! in_array( $page, [ Admin\YSSsMenuBootstrap::SLUG_SETTINGS, Admin\YSSsMenuBootstrap::SLUG_ANALYTICS, Admin\YSSsMenuBootstrap::SLUG_HELP ], true ) ) {
+		$tab  = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : '';    // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		// 自有設定／說明頁，或核心「報表分析」的「搜尋分析」tab（分析 UI 整合於該 tab）。
+		$own_page   = in_array( $page, [ Admin\YSSsMenuBootstrap::SLUG_SETTINGS, Admin\YSSsMenuBootstrap::SLUG_HELP ], true );
+		$report_tab = ( 'ys-ec-reports' === $page && 'search' === $tab );
+		if ( ! $own_page && ! $report_tab ) {
 			return;
 		}
 

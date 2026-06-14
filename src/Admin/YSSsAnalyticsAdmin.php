@@ -13,19 +13,46 @@ defined( 'ABSPATH' ) || exit;
 
 final class YSSsAnalyticsAdmin {
 
+	/**
+	 * 獨立頁（保留相容）：包 YSAdminApp 殼 + 主體。實際入口已改為核心「報表分析」tab。
+	 */
 	public static function render(): void {
 		$has_app = class_exists( '\YangSheep\Ecommerce\Admin\YSAdminApp' );
 
 		if ( $has_app ) {
 			\YangSheep\Ecommerce\Admin\YSAdminApp::open(
 				__( '搜尋分析', 'ys-cart-smart-search' ),
-				__( 'YS CART / 智慧搜尋 / 搜尋分析', 'ys-cart-smart-search' )
+				__( 'YS CART / 進階搜尋 / 搜尋分析', 'ys-cart-smart-search' )
 			);
 		} else {
 			echo '<div class="wrap"><h1>' . esc_html__( '搜尋分析', 'ys-cart-smart-search' ) . '</h1>';
 		}
+
+		self::render_body();
+
+		if ( $has_app ) {
+			\YangSheep\Ecommerce\Admin\YSAdminApp::close();
+		} else {
+			echo '</div>';
+		}
+	}
+
+	/**
+	 * 分析主體（不含後台外殼）。由獨立頁 render() 或核心報表 tab
+	 * （ys_ec_report_render_tab_search）直接呼叫。
+	 *
+	 * 本分析自帶區間切換（today/7/30/90/自訂），故報表頁傳入的 $date_from/$date_to
+	 * 僅作相容簽章不使用；同時隱藏核心報表工具列避免兩組日期控制衝突。
+	 *
+	 * @param string $date_from
+	 * @param string $date_to
+	 */
+	public static function render_body( string $date_from = '', string $date_to = '' ): void {
+		// 在核心報表 tab 內渲染時，隱藏核心日期工具列（本分析自帶區間列）。
+		// 於獨立頁無 .ysca-report-toolbar，規則無副作用。
+		echo '<style>.ysca-page-root--reports .ysca-report-toolbar{display:none}</style>';
 		?>
-		<div class="ys-ss-admin" id="ys-ss-analytics-app">
+		<div class="ys-ss-admin ys-ss-analytics-wrap" id="ys-ss-analytics-app">
 
 			<div class="ysca-card ysca-card--soft ys-ss-card">
 				<div class="ys-ss-rangebar" role="group" aria-label="<?php esc_attr_e( '期間篩選', 'ys-cart-smart-search' ); ?>">
@@ -44,10 +71,10 @@ final class YSSsAnalyticsAdmin {
 			</div>
 
 			<div class="ys-ss-kpis">
-				<div class="ysca-card ysca-card--soft ys-ss-kpi"><span><?php esc_html_e( '總搜尋次數', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-total">–</strong></div>
-				<div class="ysca-card ysca-card--soft ys-ss-kpi"><span><?php esc_html_e( '獨立關鍵字', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-unique">–</strong></div>
-				<div class="ysca-card ysca-card--soft ys-ss-kpi"><span><?php esc_html_e( '零結果次數', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-zero">–</strong></div>
-				<div class="ysca-card ysca-card--soft ys-ss-kpi"><span><?php esc_html_e( '零結果率', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-zerorate">–</strong></div>
+				<div class="ysca-card ysca-card--soft ys-ss-kpi ys-ss-kpi--total"><span><?php esc_html_e( '總搜尋次數', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-total">–</strong></div>
+				<div class="ysca-card ysca-card--soft ys-ss-kpi ys-ss-kpi--unique"><span><?php esc_html_e( '獨立關鍵字', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-unique">–</strong></div>
+				<div class="ysca-card ysca-card--soft ys-ss-kpi ys-ss-kpi--zero"><span><?php esc_html_e( '零結果次數', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-zero">–</strong></div>
+				<div class="ysca-card ysca-card--soft ys-ss-kpi ys-ss-kpi--rate"><span><?php esc_html_e( '零結果率', 'ys-cart-smart-search' ); ?></span><strong id="ys-ss-kpi-zerorate">–</strong></div>
 			</div>
 
 			<div class="ysca-card ysca-card--soft ys-ss-card">
@@ -86,11 +113,5 @@ final class YSSsAnalyticsAdmin {
 			</div>
 		</div>
 		<?php
-
-		if ( $has_app ) {
-			\YangSheep\Ecommerce\Admin\YSAdminApp::close();
-		} else {
-			echo '</div>';
-		}
 	}
 }
