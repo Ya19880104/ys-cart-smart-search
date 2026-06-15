@@ -25,31 +25,12 @@ final class YSSsQueryRepository {
 		return substr( strtolower( $q ), 0, 100 );
 	}
 
-	public static function log( string $raw, int $results_total, string $content_types, string $source, string $visitor_hash ): void {
-		global $wpdb;
-
-		$norm = self::normalize( $raw );
-		if ( '' === $norm ) {
-			return;
-		}
-
-		$wpdb->insert( YSSsSchema::queries_table(), [
-			'query_norm'    => $norm,
-			'query_raw'     => mb_substr( trim( $raw ), 0, 150 ),
-			'results_total' => max( 0, $results_total ),
-			'has_results'   => $results_total > 0 ? 1 : 0,
-			'content_types' => substr( $content_types, 0, 60 ),
-			'source'        => in_array( $source, [ 'bar', 'popup', 'page' ], true ) ? $source : 'bar',
-			'visitor_hash'  => substr( $visitor_hash, 0, 16 ),
-			'created_at'    => current_time( 'mysql' ),
-		] );
-	}
-
 	/**
-	 * 結果頁（B 模式）server 端記錄。對「同訪客 + 同正規化詞」於近 600 秒內已記錄者
-	 * 去重後才寫入（source='page'），避免與下拉 JS /log 雙記、也防結果頁重整／分頁灌水。
+	 * 行為紀錄寫入（唯一寫入瓶頸）。內建伺服器端 600 秒去重：對「同訪客 + 同正規化詞」於近
+	 * 600 秒內已記錄者略過（跨來源），因此公開 /log 端點即使被重複呼叫也無法灌爆搜尋分析
+	 *（前端 sessionStorage 去重僅為體驗、非安全邊界）。失敗絕不影響搜尋主流程。
 	 */
-	public static function log_page( string $raw, int $results_total, string $content_types, string $visitor_hash ): void {
+	public static function log( string $raw, int $results_total, string $content_types, string $source, string $visitor_hash ): void {
 		global $wpdb;
 
 		$norm = self::normalize( $raw );
@@ -59,19 +40,38 @@ final class YSSsQueryRepository {
 
 		$table = YSSsSchema::queries_table();
 		$vh    = substr( $visitor_hash, 0, 16 );
-		$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 600 );
 
-		$dup = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT 1 FROM {$table} WHERE visitor_hash = %s AND query_norm = %s AND created_at >= %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$vh,
+		// 伺服器端去重：同訪客 + 同詞近 600 秒內已記錄則略過（用 norm_time 索引：同詞 600 秒
+		// 內列數極少，再濾 visitor_hash 很快）。避免下拉/結果頁雙記與重複呼叫灌水。
+		$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 600 );
+		$dup   = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT 1 FROM {$table} WHERE query_norm = %s AND created_at >= %s AND visitor_hash = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$norm,
-			$since
+			$since,
+			$vh
 		) );
 		if ( $dup ) {
-			return; // 近期已由下拉或本頁記錄過，不重複計數。
+			return;
 		}
 
-		self::log( $raw, $results_total, $content_types, 'page', $vh );
+		$wpdb->insert( $table, [
+			'query_norm'    => $norm,
+			'query_raw'     => mb_substr( trim( $raw ), 0, 150 ),
+			'results_total' => max( 0, $results_total ),
+			'has_results'   => $results_total > 0 ? 1 : 0,
+			'content_types' => substr( $content_types, 0, 60 ),
+			'source'        => in_array( $source, [ 'bar', 'popup', 'page' ], true ) ? $source : 'bar',
+			'visitor_hash'  => $vh,
+			'created_at'    => current_time( 'mysql' ),
+		] );
+	}
+
+	/**
+	 * 結果頁（B 模式）server 端記錄（source='page'）。去重已下沉至 log()
+	 *（同訪客 + 同詞 600 秒跨來源），此處僅標記來源、不再重複去重邏輯。
+	 */
+	public static function log_page( string $raw, int $results_total, string $content_types, string $visitor_hash ): void {
+		self::log( $raw, $results_total, $content_types, 'page', $visitor_hash );
 	}
 
 	/**

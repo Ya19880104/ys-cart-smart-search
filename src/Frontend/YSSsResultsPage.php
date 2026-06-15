@@ -107,6 +107,22 @@ final class YSSsResultsPage {
 	}
 
 	/**
+	 * 「查看全部」/ 即時面板落點 URL（mode-aware；集中落點，避免下拉與表單 action 漂移）。
+	 * B 模式且有有效結果頁 → 結果頁 permalink + ys_ec_search；
+	 * 否則（A 模式或無有效結果頁）→ 商店頁 + ys_ec_search（與既有 A 行為一致）。
+	 * 與 form_action()／核心搜尋同一參數 ys_ec_search。
+	 */
+	public static function search_url( string $query ): string {
+		$settings = YSSsSettings::all();
+		$is_page  = 'page' === ( $settings['results_mode'] ?? 'list' )
+			&& self::valid_page_id( (int) ( $settings['results_page_id'] ?? 0 ) );
+		if ( $is_page ) {
+			return add_query_arg( 'ys_ec_search', $query, self::page_url() );
+		}
+		return YSSmartSearchDetector::shop_url( [ 'ys_ec_search' => $query ] );
+	}
+
+	/**
 	 * @param array<string,mixed>|string $atts
 	 */
 	public static function render( $atts = [] ): string {

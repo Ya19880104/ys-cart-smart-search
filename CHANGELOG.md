@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.4.3] - 2026-06-15 — review 收斂：B 模式「查看全部」落點 + 分析寫入去重
+
+### Fixed
+
+- **B 模式即時面板「查看全部」仍導向核心商店頁**（P1）：`YSSsSearchService::search()` 的
+  `view_all` 不論結果模式都用 `shop_url()`，導致下拉面板「查看全部」（`ys-ss-front.js`
+  直接用 `data.view_all`）在 B 模式仍落到 `/?ys_ec_search=`（核心商店）而非獨立混合
+  結果頁 `/ys-search/`。表單 action 走 `form_action()` page 模式邏輯故頁面 smoke 會過、
+  唯獨下拉「查看全部」路徑錯。改為集中於 mode-aware helper
+  `YSSsResultsPage::search_url()`：B 模式且有有效結果頁 → 結果頁 + `ys_ec_search`；
+  否則沿用商店頁（A 行為不變）。
+
+### Security / Integrity
+
+- **公開 `/smart-search/log` 端點可被重複呼叫污染搜尋分析**（P2）：先前僅結果頁
+  `log_page()` 有 600 秒 server 端去重，下拉 `bar`/`popup` 寫入無去重（前端
+  sessionStorage 去重非安全邊界）。將 **600 秒去重下沉至唯一寫入瓶頸 `log()`**
+  （同訪客 + 同正規化詞、跨來源），公開端點即使被重複打也無法灌爆分析；`log_page()`
+  簡化為委派、不再重複去重邏輯。沿用既有 `norm_time` 索引、無 schema 變更。
+
+### Notes
+
+- **權限模型維持 `manage_options`（OR `manage_ys_ecommerce`）不變**：經查核心自身選單
+  即用同款 `manage_options` fallback、且未透過 `add_cap`/`map_meta_cap` 授予
+  `manage_ys_ecommerce`；audiobooks 亦同款、affiliate/content-access 純 `manage_options`。
+  生態系實際政策即 `manage_options`，本外掛已一致；若日後要全生態系遷移自訂 cap，應由
+  核心主導 ADR，不在 addon 端單方變更。
+- `bar`/`popup` 的 `total`/`has_results` 仍取自 client payload（結果頁 `page` 來源為
+  server 端計算）。去重已大幅降低可灌入量；如需 KPI 完全不信任 client，需於 `/log`
+  端重跑搜尋取真實筆數（成本較高），暫不納入。
+
 ## [1.4.2] - 2026-06-15 — 工程團隊 review 修正
 
 ### Fixed

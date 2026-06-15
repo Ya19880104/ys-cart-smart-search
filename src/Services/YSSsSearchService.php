@@ -13,6 +13,7 @@ namespace YangSheep\SmartSearch\Services;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Frontend\YSSsResultsPage;
 use YangSheep\SmartSearch\YSSmartSearchDetector;
 
 defined( 'ABSPATH' ) || exit;
@@ -58,7 +59,7 @@ final class YSSsSearchService {
 			'q'        => $norm,
 			'total'    => $total,
 			'groups'   => $groups,
-			'view_all' => YSSmartSearchDetector::shop_url( [ 'ys_ec_search' => $norm ] ),
+			'view_all' => YSSsResultsPage::search_url( $norm ),
 		];
 	}
 
