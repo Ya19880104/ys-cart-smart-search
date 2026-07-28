@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.4] - 2026-07-28
+
+### Fixed
+
+- Stop the bundled YS Hub Client library from registering an invalid
+  WooCommerce HPOS declaration from its vendor path.
+
 ## [1.4.3] - 2026-06-15 — review 收斂：B 模式「查看全部」落點 + 分析寫入去重
 
 ### Fixed
