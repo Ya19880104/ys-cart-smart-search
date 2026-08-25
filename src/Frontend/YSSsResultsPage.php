@@ -13,6 +13,7 @@ namespace YangSheep\SmartSearch\Frontend;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
 use YangSheep\SmartSearch\YSSmartSearchDetector;
@@ -141,6 +142,13 @@ final class YSSsResultsPage {
 
 		if ( '' === trim( $raw ) ) {
 			echo '<p class="ys-ss-results__hint">' . esc_html__( '請輸入搜尋關鍵字。', 'ys-cart-smart-search' ) . '</p></div>';
+			return (string) ob_get_clean();
+		}
+
+		// 防注入：辨識為攻擊探測即拒絕執行（不查 DB、不記錄、不回顯原字串），
+		// 與 query 端點一致；顯示與零結果相同的中性提示，不給攻擊者 oracle。
+		if ( YSSsInjectionGuard::is_attack( $raw ) ) {
+			echo '<p class="ys-ss-results__hint">' . esc_html__( '沒有符合的結果。', 'ys-cart-smart-search' ) . '</p></div>';
 			return (string) ob_get_clean();
 		}
 
