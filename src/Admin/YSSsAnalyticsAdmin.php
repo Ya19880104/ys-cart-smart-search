@@ -66,6 +66,8 @@ final class YSSsAnalyticsAdmin {
 						<button type="button" class="ysca-btn ysca-btn--sm ysca-btn--primary" id="ys-ss-apply"><?php esc_html_e( '套用', 'ys-cart-smart-search' ); ?></button>
 					</span>
 					<a class="ysca-btn ysca-btn--sm ysca-btn--ghost" id="ys-ss-export" href="#" download><?php esc_html_e( '匯出 CSV', 'ys-cart-smart-search' ); ?></a>
+					<button type="button" class="ysca-btn ysca-btn--sm ysca-btn--ghost" id="ys-ss-purge-injection" title="<?php esc_attr_e( '掃描並刪除注入/攻擊探測紀錄，只清除攻擊列、保留正常搜尋。', 'ys-cart-smart-search' ); ?>"><?php esc_html_e( '清除注入紀錄', 'ys-cart-smart-search' ); ?></button>
+					<span class="ys-ss-muted" id="ys-ss-purge-msg" role="status" aria-live="polite"></span>
 				</div>
 			</div>
 
@@ -105,8 +107,9 @@ final class YSSsAnalyticsAdmin {
 							<th><?php esc_html_e( '關鍵字', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"><?php esc_html_e( '零結果', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"><?php esc_html_e( '總次數', 'ys-cart-smart-search' ); ?></th>
+							<th class="ys-ss-w90"></th>
 						</tr></thead>
-						<tbody id="ys-ss-zero-body"><tr><td colspan="4"><?php esc_html_e( '載入中…', 'ys-cart-smart-search' ); ?></td></tr></tbody>
+						<tbody id="ys-ss-zero-body"><tr><td colspan="5"><?php esc_html_e( '載入中…', 'ys-cart-smart-search' ); ?></td></tr></tbody>
 					</table>
 				</div>
 			</div>

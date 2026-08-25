@@ -177,7 +177,12 @@
 			return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 		}
 
+		var curFrom = '';
+		var curTo = '';
+
 		function load(from, to) {
+			curFrom = from;
+			curTo = to;
 			fromInput.value = from;
 			toInput.value = to;
 
@@ -220,11 +225,37 @@
 			});
 		}
 
+		/* 單筆刪除某關鍵字（原始+彙總全部紀錄），完成後重載目前區間。 */
+		function deleteTerm(term, btn) {
+			if (!window.confirm('刪除關鍵字「' + term + '」的全部搜尋紀錄？此操作無法復原。')) { return; }
+			if (btn) { btn.disabled = true; }
+			api('/term?term=' + encodeURIComponent(term), { method: 'DELETE' })
+				.then(function () { load(curFrom, curTo); })
+				.catch(function () { if (btn) { btn.disabled = false; } });
+		}
+
+		/* 刪除鈕（垃圾桶）：排行每列共用。 */
+		function delButton(term) {
+			var del = document.createElement('button');
+			del.type = 'button';
+			del.className = 'ysca-btn ysca-btn--sm ysca-btn--ghost';
+			del.textContent = '🗑';
+			del.title = '刪除此關鍵字的全部紀錄';
+			del.setAttribute('aria-label', '刪除 ' + term);
+			del.addEventListener('click', function () { deleteTerm(term, del); });
+			return del;
+		}
+
 		function renderTop(rows) {
 			var body = document.getElementById('ys-ss-top-body');
 			body.textContent = '';
 			if (!rows.length) {
-				body.innerHTML = '<tr><td colspan="5">期間內無資料。</td></tr>';
+				var tr0 = document.createElement('tr');
+				var td0 = document.createElement('td');
+				td0.colSpan = 5;
+				td0.textContent = '期間內無資料。';
+				tr0.appendChild(td0);
+				body.appendChild(tr0);
 				return;
 			}
 			rows.forEach(function (r, i) {
@@ -235,6 +266,7 @@
 					tr.appendChild(td);
 				});
 				var tdA = document.createElement('td');
+				tdA.className = 'ys-ss-rowactions';
 				var btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'ysca-btn ysca-btn--sm ysca-btn--ghost';
@@ -246,6 +278,7 @@
 					});
 				});
 				tdA.appendChild(btn);
+				tdA.appendChild(delButton(r.term));
 				tr.appendChild(tdA);
 				body.appendChild(tr);
 			});
@@ -255,7 +288,12 @@
 			var body = document.getElementById('ys-ss-zero-body');
 			body.textContent = '';
 			if (!rows.length) {
-				body.innerHTML = '<tr><td colspan="4">期間內沒有零結果搜尋 🎉</td></tr>';
+				var tr0 = document.createElement('tr');
+				var td0 = document.createElement('td');
+				td0.colSpan = 5;
+				td0.textContent = '期間內沒有零結果搜尋 🎉';
+				tr0.appendChild(td0);
+				body.appendChild(tr0);
 				return;
 			}
 			rows.forEach(function (r, i) {
@@ -265,6 +303,10 @@
 					td.textContent = String(v);
 					tr.appendChild(td);
 				});
+				var tdA = document.createElement('td');
+				tdA.className = 'ys-ss-rowactions';
+				tdA.appendChild(delButton(r.term));
+				tr.appendChild(tdA);
 				body.appendChild(tr);
 			});
 		}
@@ -288,6 +330,25 @@
 				load(fromInput.value, toInput.value);
 			}
 		});
+
+		/* 清除注入/攻擊探測紀錄（只刪攻擊列、保留正常搜尋）。 */
+		var purgeInjBtn = document.getElementById('ys-ss-purge-injection');
+		var purgeMsg = document.getElementById('ys-ss-purge-msg');
+		if (purgeInjBtn) {
+			purgeInjBtn.addEventListener('click', function () {
+				if (!window.confirm('掃描並刪除注入/攻擊探測搜尋紀錄？只會清除攻擊列，正常搜尋（含正常零結果）保留。')) { return; }
+				purgeInjBtn.disabled = true;
+				if (purgeMsg) { purgeMsg.textContent = '掃描中…'; }
+				api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'injection' }) })
+					.then(function (d) {
+						if (purgeMsg) { purgeMsg.textContent = '已清除 ' + d.deleted + ' 筆注入紀錄'; }
+						load(curFrom, curTo);
+						setTimeout(function () { if (purgeMsg) { purgeMsg.textContent = ''; } }, 4000);
+					})
+					.catch(function () { if (purgeMsg) { purgeMsg.textContent = '清除失敗'; } })
+					.then(function () { purgeInjBtn.disabled = false; });
+			});
+		}
 
 		/* 預設 30 天 */
 		var to = new Date();

@@ -13,6 +13,7 @@ namespace YangSheep\SmartSearch\Api;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
@@ -60,6 +61,14 @@ final class YSSsPublicController {
 			$q = mb_substr( $q, 0, 100, 'UTF-8' );
 		} else {
 			$q = substr( $q, 0, 100 );
+		}
+
+		// 防注入：辨識為攻擊探測（SSTI/XSS/穿越/SQLi/SSRF）即拒絕執行搜尋，回空結果
+		// （不報錯、不洩漏偵測，避免給攻擊者 oracle），且不記錄。
+		if ( YSSsInjectionGuard::is_attack( $q ) ) {
+			$response = rest_ensure_response( YSSsSearchService::empty_result( $q ) );
+			$response->header( 'Cache-Control', 'no-store' );
+			return $response;
 		}
 
 		$result = YSSsSearchService::search( $q );

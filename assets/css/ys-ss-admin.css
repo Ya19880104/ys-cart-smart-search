@@ -84,6 +84,7 @@
 }
 
 .ys-ss-w90 { width: 90px; }
+.ys-ss-rowactions { white-space: nowrap; display: flex; gap: 4px; align-items: center; justify-content: flex-end; }
 
 .ys-ss-kw-edit { width: 100%; }
 .ys-ss-kw-sort { width: 70px; }

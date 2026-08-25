@@ -9,6 +9,8 @@
 
 namespace YangSheep\SmartSearch\Database;
 
+use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YSSsQueryRepository {
@@ -35,6 +37,13 @@ final class YSSsQueryRepository {
 
 		$norm = self::normalize( $raw );
 		if ( '' === $norm ) {
+			return;
+		}
+
+		// 進站攔截（唯一寫入瓶頸）：攻擊探測（SSTI/XSS/穿越/SQLi/SSRF）一律不記錄，
+		// 避免污染分析與自動熱門建議。原始詞也一併檢查（normalize 不會移除注入標記，
+		// 但保險起見兩者都驗）。
+		if ( YSSsInjectionGuard::is_attack( $norm ) || YSSsInjectionGuard::is_attack( $raw ) ) {
 			return;
 		}
 
@@ -220,7 +229,99 @@ final class YSSsQueryRepository {
 			$from
 		) );
 
-		return array_map( 'strval', $rows ?: [] );
+		// 縱深防禦：既有紀錄若含注入探測（清理前的殘留），絕不推上建議清單。
+		$rows = array_filter( array_map( 'strval', $rows ?: [] ), static fn( string $t ): bool => ! YSSsInjectionGuard::is_attack( $t ) );
+
+		return array_values( $rows );
+	}
+
+	/**
+	 * 單筆刪除：移除某關鍵字（正規化後）在原始表與彙總表的全部紀錄。
+	 * 分析報表以「詞」為單位，故單筆刪除 = 刪除該詞的所有紀錄。
+	 *
+	 * @return array{queries:int,daily:int} 各表刪除筆數。
+	 */
+	public static function delete_term( string $term ): array {
+		global $wpdb;
+		$norm = self::normalize( $term );
+		if ( '' === $norm ) {
+			return [ 'queries' => 0, 'daily' => 0 ];
+		}
+		$queries = YSSsSchema::queries_table();
+		$daily   = YSSsSchema::terms_daily_table();
+
+		$dq = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$queries} WHERE query_norm = %s", $norm ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$dd = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE term = %s", $norm ) );          // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return [ 'queries' => $dq, 'daily' => $dd ];
+	}
+
+	/**
+	 * 清理注入/攻擊探測紀錄：掃描兩表，凡辨識為攻擊探測的詞一律刪除。
+	 * 只移除攻擊列，保留正常搜尋（含正常的零結果商機詞）。批次防鎖表。
+	 *
+	 * @return int 刪除的原始紀錄筆數。
+	 */
+	public static function purge_injection(): int {
+		global $wpdb;
+		$queries = YSSsSchema::queries_table();
+		$daily   = YSSsSchema::terms_daily_table();
+
+		// 以 id 分頁掃全表（不靠脆弱的 SQL 前置過濾），PHP 端 is_attack 為唯一判準。
+		// 保留期已上限資料量；本動作由後台手動觸發、頻率低。
+		$deleted = 0;
+
+		$last = 0;
+		for ( $i = 0; $i < 1000; $i++ ) {
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT id, query_norm FROM {$queries} WHERE id > %d ORDER BY id ASC LIMIT 2000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$last
+			), ARRAY_A );
+			if ( ! $rows ) {
+				break;
+			}
+			$kill = [];
+			foreach ( $rows as $r ) {
+				$last = (int) $r['id'];
+				if ( YSSsInjectionGuard::is_attack( (string) $r['query_norm'] ) ) {
+					$kill[] = (int) $r['id'];
+				}
+			}
+			if ( $kill ) {
+				$in       = implode( ',', array_map( 'intval', $kill ) );
+				$deleted += (int) $wpdb->query( "DELETE FROM {$queries} WHERE id IN ({$in})" ); // phpcs:ignore WordPress.DB.PreparedSQL
+			}
+			if ( count( $rows ) < 2000 ) {
+				break;
+			}
+		}
+
+		$dlast = 0;
+		for ( $i = 0; $i < 1000; $i++ ) {
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT id, term FROM {$daily} WHERE id > %d ORDER BY id ASC LIMIT 2000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$dlast
+			), ARRAY_A );
+			if ( ! $rows ) {
+				break;
+			}
+			$dkill = [];
+			foreach ( $rows as $r ) {
+				$dlast = (int) $r['id'];
+				if ( YSSsInjectionGuard::is_attack( (string) $r['term'] ) ) {
+					$dkill[] = (int) $r['id'];
+				}
+			}
+			if ( $dkill ) {
+				$in = implode( ',', array_map( 'intval', $dkill ) );
+				$wpdb->query( "DELETE FROM {$daily} WHERE id IN ({$in})" ); // phpcs:ignore WordPress.DB.PreparedSQL
+			}
+			if ( count( $rows ) < 2000 ) {
+				break;
+			}
+		}
+
+		return $deleted;
 	}
 
 	/**

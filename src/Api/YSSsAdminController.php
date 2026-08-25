@@ -87,6 +87,15 @@ final class YSSsAdminController {
 			'callback'            => [ $this, 'purge' ],
 			'permission_callback' => [ $this, 'permission_admin' ],
 		] );
+
+		register_rest_route( self::NS, $base . '/term', [
+			'methods'             => \WP_REST_Server::DELETABLE,
+			'callback'            => [ $this, 'delete_term' ],
+			'permission_callback' => [ $this, 'permission_admin' ],
+			'args'                => [
+				'term' => [ 'type' => 'string', 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ],
+			],
+		] );
 	}
 
 	/**
@@ -239,8 +248,28 @@ final class YSSsAdminController {
 			return rest_ensure_response( [ 'ok' => true, 'counts' => YSSsQueryRepository::counts() ] );
 		}
 
+		// 清理注入/攻擊探測紀錄（只刪攻擊列，保留正常搜尋）。
+		if ( 'injection' === $mode ) {
+			$deleted = YSSsQueryRepository::purge_injection();
+			YSSsSuggestService::invalidate();
+			return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+		}
+
 		$settings = YSSsSettings::all();
 		$deleted  = YSSsQueryRepository::purge_older_than( (int) $settings['retention_days'] );
+		return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+	}
+
+	/**
+	 * 單筆刪除：移除某關鍵字在原始表與彙總表的全部紀錄（分析以「詞」為單位）。
+	 */
+	public function delete_term( \WP_REST_Request $request ) {
+		$term = sanitize_text_field( wp_unslash( (string) $request->get_param( 'term' ) ) );
+		if ( '' === trim( $term ) ) {
+			return new \WP_Error( 'ys_ss_empty_term', __( '請指定要刪除的關鍵字。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
+		}
+		$deleted = YSSsQueryRepository::delete_term( $term );
+		YSSsSuggestService::invalidate();
 		return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
 	}
 }

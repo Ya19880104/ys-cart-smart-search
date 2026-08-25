@@ -64,6 +64,21 @@ final class YSSsSearchService {
 	}
 
 	/**
+	 * 空結果（防注入時回傳，形狀與 search() 一致，不執行任何 DB 查詢）。
+	 *
+	 * @return array<string,mixed>
+	 */
+	public static function empty_result( string $q ): array {
+		$norm = YSSsQueryRepository::normalize( $q );
+		return [
+			'q'        => $norm,
+			'total'    => 0,
+			'groups'   => [],
+			'view_all' => YSSsResultsPage::search_url( $norm ),
+		];
+	}
+
+	/**
 	 * 結果頁（B 模式）：商品分頁 + 分類/文章（僅第一頁顯示，因通常筆數少）。
 	 *
 	 * @return array<string,mixed> { q, products_total, page, per_page, total_pages, groups[], content_types[] }

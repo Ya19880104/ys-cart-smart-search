@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.5.0] - 2026-08-25 — 搜尋注入防護 + 後台紀錄清理
+
+### Security
+
+- **進站防注入攔截**：新增 `YSSsInjectionGuard`（單一真相源），辨識 SSTI 模板注入
+  （`{{7*7}}`、`${...}`、`#set(...)`）、XSS（`<svg onload=>`、事件處理器、`javascript:`）、
+  路徑穿越（`../`、超長點序列）、SQLi（`union select` 等）、SSRF/RCE（`nslookup`、
+  `popen`、`net::`、URL scheme）與控制字元。判準只針對「真實商品搜尋永不出現」的結構
+  字元與高訊號 token，不誤殺中文（CJK）／英數／連字號等正常商品詞。
+- 攻擊探測在**唯一寫入瓶頸 `YSSsQueryRepository::log()`** 一律不記錄，故不再污染搜尋分析
+  與自動熱門建議。
+- 公開 `query` 端點對攻擊探測**拒絕執行搜尋**、回傳空結果（不報錯、不洩漏偵測，避免給
+  攻擊者 oracle）。
+- 自動熱門詞 `auto_terms()` 對既有殘留注入詞加上縱深過濾，確保絕不出現在前台建議。
+  （前後台呈現本就以 `textContent`／純 DOM 組裝，注入字串一律 inert；本版再從源頭阻斷。）
+
+### Added
+
+- 後台搜尋分析可**單筆刪除**某關鍵字的全部紀錄（原始 + 彙總）：`DELETE /admin/smart-search/term`，
+  排行每列新增垃圾桶刪除鈕。
+- 後台「**清除注入紀錄**」一鍵掃描並刪除攻擊探測列（只刪攻擊、保留正常搜尋含正常零結果）：
+  `POST /admin/smart-search/purge` `mode=injection`。
+- 保留既有「一次清理所有紀錄」（`mode=all` + 確認碼）與逾期清理（`mode=expired`）。
+
 ## [1.4.4] - 2026-07-28
 
 ### Fixed
