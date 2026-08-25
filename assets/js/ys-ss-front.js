@@ -292,9 +292,10 @@
 		form.addEventListener('submit', function () {
 			var q = input.value.trim();
 			if (!q) { return; }
+			// 最近搜尋是本機 UX，不依賴 analytics receipt；快速提交或 REST 失敗仍須保存。
+			recentPush(q);
 			var proof = form._ysSsLogProof;
 			if (!proof || proof.input !== q || !proof.receipt) { return; }
-			recentPush(q);
 			// page 模式（獨立結果頁）：交由結果頁 server 端記錄，避免與此處雙記。
 			if (CFG.resultsMode !== 'page') {
 				logQuery(proof.query, proof.receipt, sourceOf(form));

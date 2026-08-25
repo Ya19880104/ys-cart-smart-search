@@ -44,7 +44,7 @@ foreach ($cases['allowed'] as $label => $input) {
         ysss_assert_true(class_exists(YSSsSearchInput::class), 'YSSsSearchInput is missing');
         $decision = YSSsSearchInput::inspect($input);
         ysss_assert_same(false, $decision['blocked'] ?? null);
-        ysss_assert_true('' !== ($decision['query'] ?? ''), 'Accepted query must remain non-empty');
+        ysss_assert_same($input, $decision['query'] ?? null, 'Accepted search bytes were changed');
     });
 }
 

@@ -37,11 +37,13 @@ final class YSSsSearchInput {
 			}
 		}
 
-		$query = sanitize_text_field( $raw );
+		// The raw value has already passed UTF-8/control and canonical abuse checks. Preserve benign
+		// technical syntax verbatim; prepared SQL and context-aware output escaping remain the safety
+		// boundaries, so a lossy HTML-oriented sanitizer is neither required nor appropriate here.
+		$query = trim( preg_replace( '/\s+/u', ' ', $raw ) ?? '' );
 		if ( 1 !== preg_match( '//u', $query ) || YSSsInjectionGuard::is_attack( $query ) ) {
 			return self::blocked();
 		}
-		$query = trim( preg_replace( '/\s+/u', ' ', $query ) ?? '' );
 		$query = function_exists( 'mb_substr' )
 			? mb_substr( $query, 0, self::MAX_QUERY_CHARS, 'UTF-8' )
 			: substr( $query, 0, self::MAX_QUERY_CHARS );

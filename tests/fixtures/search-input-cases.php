@@ -5,6 +5,7 @@ return [
     'blocked' => [
         'lossy SVG event payload' => '<svg onload=alert(1)>nova</svg>',
         'HTML image event payload' => '<img src=x onerror=alert(1)>',
+        'HTML generic event payload' => '<div onmouseover=alert(1)>nova</div>',
         'SSTI double braces' => '{{7*7}}',
         'SSTI dollar expression' => '${7*7}',
         'SSTI hash expression' => '#{7*7}',
@@ -43,6 +44,9 @@ return [
         'Windows path manual' => 'C:\\Users\\Nova\\manual.pdf',
         'quoted music title' => "rock 'n' roll 黑膠",
         'plain language and' => 'organic and fresh',
+        'USB-C power specification' => 'USB-C and PD=65W',
+        'True Blue music title' => 'Black and True Blue 黑膠',
+        'online equals only label' => 'online=only 商品',
         'percentage product text' => '100% cotton tee',
         'version punctuation' => '版本 1.2.3.4',
         'braced size label' => 'Nova Mug {Large}',

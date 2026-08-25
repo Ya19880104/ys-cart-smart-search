@@ -33,7 +33,7 @@ final class YSSsInjectionGuard {
 
 		// XSS／HTML 執行面：攔危險元素與事件／srcdoc 屬性，不攔 C++ <vector> 等一般角括號。
 		if ( preg_match( '~<\s*/?\s*(?:script|svg|img|iframe|object|embed|link|meta|style|form|input|video|audio|body)\b~iu', $scan )
-			|| preg_match( '/\b(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
+			|| preg_match( '/<[^>\r\n]{0,512}\s(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
 			return true;
 		}
 
@@ -58,7 +58,10 @@ final class YSSsInjectionGuard {
 		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
 		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
 		if ( preg_match( '/\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark|load_file)\s*\(/iu', $sql )
-			|| preg_match( '/\b(?:or|and)\s+(?:true\b|false\b|[\'\"]?[\p{L}\p{N}_.-]{1,64}[\'\"]?\s*=\s*[\'\"]?[\p{L}\p{N}_.-]{1,64}[\'\"]?)/iu', $sql ) ) {
+			|| preg_match( '/[\'"\d)]\s+\b(?:or|and)\s+(?:true|false)\b\s*(?:--|#|;|$)/iu', $sql )
+			|| preg_match( '/\b(?:or|and)\s+([\p{L}\p{N}_.-]{1,64})\s*=\s*\1\b/iu', $sql )
+			|| preg_match( '/\b(?:or|and)\s+\'([^\']{1,64})\'\s*=\s*\'\1(?:\'|$)/iu', $sql )
+			|| preg_match( '/\b(?:or|and)\s+"([^"]{1,64})"\s*=\s*"\1(?:"|$)/iu', $sql ) ) {
 			return true;
 		}
 

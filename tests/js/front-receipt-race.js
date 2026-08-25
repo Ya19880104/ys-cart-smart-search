@@ -132,6 +132,13 @@ vm.runInNewContext(source, sandbox, { filename: 'ys-ss-front.js' });
 		throw new Error('new input did not cancel the previous signed settle timer immediately');
 	}
 	if (beacons.length !== 0) { throw new Error('stale analytics beacon was sent'); }
+
+	form.listeners.submit();
+	const recent = JSON.parse(sandbox.localStorage.getItem('ysss_recent') || '[]');
+	if (recent.length !== 1 || 'nova x' !== recent[0]) {
+		throw new Error('native submit without a receipt did not preserve the recent search');
+	}
+	if (beacons.length !== 0) { throw new Error('submit without a receipt sent an analytics beacon'); }
 })().catch((error) => {
 	console.error(error.message);
 	process.exitCode = 1;
