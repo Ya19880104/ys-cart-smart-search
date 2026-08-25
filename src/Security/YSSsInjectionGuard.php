@@ -1,16 +1,10 @@
 <?php
 /**
- * 注入/攻擊探測辨識（單一真相源）。
+ * 高訊號搜尋濫用／攻擊探測分類器。
  *
- * 判斷一個搜尋字串是否為攻擊探測（SSTI 模板注入、XSS、路徑穿越、SQLi、SSRF/RCE、
- * 控制字元），而非真實的商品搜尋。用於：
- *   ① 進站攔截（YSSsQueryRepository::log 唯一寫入瓶頸 → 不記錄；YSSsPublicController::query
- *      → 拒絕執行搜尋）。
- *   ② 建議清單過濾（auto_terms / suggest 縱深防禦）。
- *   ③ 後台清理（purge_injection 掃既有紀錄）。
- *
- * 設計原則：只針對「真實商品搜尋永遠不會出現」的結構字元與高訊號 token，避免誤殺
- * 中文（CJK）、英數、空白、連字號等正常商品詞（如「外套」「nova」「3C電子」「tee」）。
+ * 這是分析污染與非預期搜尋執行的控制，不是 SQL/XSS 的主要安全邊界。商品 SQL 仍須 prepared，
+ * 所有輸出仍須依 context 跳脫。判準刻意只攔具結構語意的高訊號模式，允許網址、技術書名、
+ * 大括號、角括號、反斜線與一般程式語彙出現在真實商品搜尋中。
  *
  * @package YangSheep\SmartSearch
  */
@@ -22,39 +16,54 @@ defined( 'ABSPATH' ) || exit;
 final class YSSsInjectionGuard {
 
 	/**
-	 * 是否為攻擊探測（true = 阻斷/不記錄/不建議/應清理）。
+	 * 是否為高訊號攻擊／濫用探測。
 	 */
 	public static function is_attack( string $q ): bool {
 		if ( '' === $q ) {
 			return false;
 		}
 
-		// ① 控制字元（正常搜尋不含；normalize 已壓一般空白）。
-		if ( preg_match( '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $q ) ) {
+		// 無效 UTF-8 與 C0/C1、雙向覆寫等危險 control 不屬於可搜尋商品文字；
+		// ZWNJ/ZWJ 保留給語言文字與 emoji，但判斷時另做無 joiner 候選以防 token 拆分。
+		if ( 1 !== preg_match( '//u', $q )
+			|| preg_match( '/[\p{Cc}\x{200B}\x{202A}-\x{202E}\x{2060}\x{2066}-\x{2069}\x{FEFF}]/u', $q ) ) {
+			return true;
+		}
+		$scan = preg_replace( '/[\x{200C}\x{200D}]/u', '', $q ) ?? $q;
+
+		// XSS／HTML 執行面：攔危險元素與事件／srcdoc 屬性，不攔 C++ <vector> 等一般角括號。
+		if ( preg_match( '~<\s*/?\s*(?:script|svg|img|iframe|object|embed|link|meta|style|form|input|video|audio|body)\b~iu', $scan )
+			|| preg_match( '/\b(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
 			return true;
 		}
 
-		// ② 結構字元：角括號 / 大括號 / 反引號 / 反斜線——真實商品搜尋永遠不會出現。
-		if ( preg_match( '/[<>{}`\\\\]/', $q ) ) {
+		// 模板執行語法；一般單層大括號與技術詞仍可搜尋。
+		if ( preg_match( '~\{\{[^\r\n]{0,512}\}\}|\$\{[^\r\n]{0,512}\}|#\{[^\r\n]{0,512}\}|\{%[^\r\n]{0,512}%\}|<%[^\r\n]{0,512}%>|#set\s*\(~iu', $scan )
+			|| preg_match( '/\b(?:__globals__|__import__)\b/iu', $scan ) ) {
 			return true;
 		}
 
-		// ③ 危險序列：模板表達式、HTML entity、URL scheme、路徑穿越、超長點序列。
-		//    以 ~ 為分隔（樣式含字面 # 如 #{ / #set(，不可用 # 當分隔）。
-		if ( preg_match( '~\$\{|#\{|#set\(|<%|%>|&#|&lt;|&gt;|://|\.\.[\\\\/]|\.{4,}~i', $q ) ) {
+		// 危險 scheme 與 metadata endpoint；https:// 等一般網址明確允許。
+		if ( preg_match( '~\b(?:javascript|vbscript|gopher|file|dict|php|expect)\s*:|\bdata\s*:\s*text/html\b~iu', $scan )
+			|| preg_match( '/\b(?:169\.254\.169\.254|metadata\.google\.internal)\b/iu', $scan ) ) {
 			return true;
 		}
 
-		// ④ 高訊號攻擊 token（SSTI / XSS 事件處理 / SQLi 含經典恆真式 / LFI / SSRF·RCE）。
-		//    以 # 為分隔避免與路徑 / 衝突；只收不會誤殺商品名的字樣。
-		if ( preg_match(
-			'#\b(?:union\s+select|insert\s+into|drop\s+table|information_schema)\b'
-			. '|[\'"]\s*(?:or|and)\s+[\'"]?[0-9]|[\'"]\s*=\s*[\'"]'
-			. '|__globals__|__import__|lipsum|freemarker|popen|subprocess|nslookup|net::|use\s+net'
-			. '|system\.ini|win\.ini|/etc/passwd|/proc/'
-			. '|onerror\s*=|onload\s*=|onfocus\s*=|onmouseover\s*=|javascript:|fetch\s*\(#i',
-			$q
-		) ) {
+		// 路徑穿越與明確的本機敏感檔案探測；一般 Windows path 可搜尋。
+		if ( preg_match( '~(?:^|/|\x5C)\.\.(?=/|\x5C|$)|/(?:etc/passwd|proc/)|\b(?:system|win)\.ini\b~iu', $scan ) ) {
+			return true;
+		}
+
+		// SQL comments 先折成空白，以識別 UNION/**/SELECT；不攔自然語言的 "Drop Table" 書名。
+		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
+		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
+		if ( preg_match( '/\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark|load_file)\s*\(/iu', $sql )
+			|| preg_match( '/\b(?:or|and)\s+(?:true\b|false\b|[\'\"]?[\p{L}\p{N}_.-]{1,64}[\'\"]?\s*=\s*[\'\"]?[\p{L}\p{N}_.-]{1,64}[\'\"]?)/iu', $sql ) ) {
+			return true;
+		}
+
+		// Shell substitution 或可直接執行命令的函式形狀；單獨反引號／程式書名不攔。
+		if ( preg_match( '/\$\([^\r\n)]{1,512}\)|\b(?:exec|system|shell_exec|passthru|popen|proc_open)\s*\(/iu', $scan ) ) {
 			return true;
 		}
 

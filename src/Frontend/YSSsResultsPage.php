@@ -13,8 +13,8 @@ namespace YangSheep\SmartSearch\Frontend;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
-use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
+use YangSheep\SmartSearch\Security\YSSsSearchInput;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
 use YangSheep\SmartSearch\YSSmartSearchDetector;
 
@@ -132,27 +132,25 @@ final class YSSsResultsPage {
 		}
 		YSSsShortcodes::ensure_assets();
 
-		$raw = isset( $_GET['ys_ec_search'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['ys_ec_search'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$raw = function_exists( 'mb_substr' ) ? mb_substr( $raw, 0, 100, 'UTF-8' ) : substr( $raw, 0, 100 );
+		$input = YSSsSearchInput::inspect( wp_unslash( $_GET['ys_ec_search'] ?? '' ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$query = $input['query'];
 		$page = isset( $_GET['ys_ss_page'] ) ? max( 1, (int) $_GET['ys_ss_page'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		ob_start();
 		echo '<div class="ys-ss-results">';
 		echo '<div class="ys-ss-results__searchbar">' . YSSsShortcodes::render_bar( [ 'placeholder' => __( '搜尋商品、分類、文章…', 'ys-cart-smart-search' ) ] ) . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- 已自含跳脫。
 
-		if ( '' === trim( $raw ) ) {
-			echo '<p class="ys-ss-results__hint">' . esc_html__( '請輸入搜尋關鍵字。', 'ys-cart-smart-search' ) . '</p></div>';
-			return (string) ob_get_clean();
-		}
-
-		// 防注入：辨識為攻擊探測即拒絕執行（不查 DB、不記錄、不回顯原字串），
-		// 與 query 端點一致；顯示與零結果相同的中性提示，不給攻擊者 oracle。
-		if ( YSSsInjectionGuard::is_attack( $raw ) ) {
+		if ( $input['blocked'] ) {
 			echo '<p class="ys-ss-results__hint">' . esc_html__( '沒有符合的結果。', 'ys-cart-smart-search' ) . '</p></div>';
 			return (string) ob_get_clean();
 		}
 
-		$res = YSSsSearchService::search_page( $raw, $page );
+		if ( '' === trim( $query ) ) {
+			echo '<p class="ys-ss-results__hint">' . esc_html__( '請輸入搜尋關鍵字。', 'ys-cart-smart-search' ) . '</p></div>';
+			return (string) ob_get_clean();
+		}
+
+		$res = YSSsSearchService::search_page( $query, $page );
 
 		// 分析記錄（去重）：僅第一頁；有/無結果都記（零結果＝商機）。
 		if ( 1 === $page ) {
@@ -163,7 +161,7 @@ final class YSSsResultsPage {
 				}
 			}
 			try {
-				YSSsQueryRepository::log_page( $raw, $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
+				YSSsQueryRepository::log_page( $query, $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
 			} catch ( \Throwable $e ) {
 				// 分析旁路：寫入失敗不影響頁面。
 			}
@@ -173,7 +171,7 @@ final class YSSsResultsPage {
 			. esc_html( sprintf(
 				/* translators: 1: 關鍵字, 2: 商品筆數 */
 				__( '「%1$s」的搜尋結果', 'ys-cart-smart-search' ),
-				$raw
+				$query
 			) )
 			. ' <span class="ys-ss-results__count">'
 			. esc_html( sprintf(
@@ -189,7 +187,7 @@ final class YSSsResultsPage {
 			foreach ( $res['groups'] as $g ) {
 				self::render_group( $g );
 			}
-			self::render_pagination( $raw, (int) $res['page'], (int) $res['total_pages'] );
+			self::render_pagination( $query, (int) $res['page'], (int) $res['total_pages'] );
 		}
 
 		echo '</div>';

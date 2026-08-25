@@ -96,7 +96,7 @@ $check('C8 addon 5 rules (core ns / no admin-ajax / no top menu / YSAdminApp / y
 $check('C9 security (rate limits / sanitized log / admin nonce+cap / daily-salt hash)',
     str_contains($pubCtrl, "allow( 'query', 60 )")
     && str_contains($pubCtrl, "allow( 'log', 30 )")
-    && str_contains($pubCtrl, 'sanitize_text_field')
+    && str_contains($pubCtrl, 'YSSsSearchInput::inspect')
     && str_contains($admCtrl, "wp_verify_nonce")
     && str_contains($admCtrl, "manage_options")
     && str_contains($limiter, "gmdate( 'Ymd' )"));
@@ -211,7 +211,7 @@ $check('C22 v1.4.x rename + old-core fallback + ensure_page cap-guard + search_p
 // C23：B 模式 view_all 落點集中 mode-aware（P1）+ 分析寫入 600 秒去重下沉至 log()（P2）
 $check('C23 v1.4.3 view_all mode-aware helper + write-path dedupe centralized in log()',
     // P1：view_all 改用 YSSsResultsPage::search_url（非直接 shop_url）；helper 為 mode-aware
-    str_contains($search, "'view_all' => YSSsResultsPage::search_url(")
+    preg_match("/'view_all'\\s*=>\\s*YSSsResultsPage::search_url\\(/", $search)
     && str_contains($results, 'function search_url')
     && str_contains($results, 'results_mode')
     && str_contains($results, "add_query_arg( 'ys_ec_search'")
@@ -226,23 +226,26 @@ $check('C23 v1.4.3 view_all mode-aware helper + write-path dedupe centralized in
 
 // ── v1.5.0（搜尋注入防護 + 後台清理）──
 $guard = $read('src/Security/YSSsInjectionGuard.php');
+$input = $read('src/Security/YSSsSearchInput.php');
 
 // C24 防注入：單一真相源 is_attack + 進站攔截（log 瓶頸 + query 拒絕執行）+ 建議過濾
-$check('C24 v1.5.0 injection guard: single source + ingestion block (log + query) + suggestion filter',
-    // guard 類別存在且針對結構字元/模板/事件處理器
+$check('C24 v1.5.2 raw-first guard: centralized ingress + A/B/REST closure + suggestion defense',
+    // guard 與 raw-first 決策器存在，並以高訊號模式取代 broad syntax-character ban
     str_contains($guard, 'class YSSsInjectionGuard')
     && str_contains($guard, 'function is_attack')
-    && str_contains($guard, '[<>{}`')
-    && str_contains($guard, '__globals__')
+    && str_contains($input, 'class YSSsSearchInput')
+    && str_contains($input, 'function inspect')
+    && str_contains($input, 'pre_do_shortcode_tag')
     // 唯一寫入瓶頸 log() 進站攔截
     && str_contains($queryRepo, 'YSSsInjectionGuard::is_attack')
     && preg_match('/is_attack\(\s*\$norm\s*\)\s*\|\|\s*YSSsInjectionGuard::is_attack\(\s*\$raw\s*\)/', $queryRepo)
-    // query 端拒絕執行（回空結果、不查 DB）
-    && str_contains($pubCtrl, 'YSSsInjectionGuard::is_attack')
+    // REST、A/list 與 B/page 共用 raw ingress，query route 不先 sanitize
+    && str_contains($pubCtrl, 'YSSsSearchInput::inspect')
+    && ! str_contains($pubCtrl, "'sanitize_callback' => 'sanitize_text_field'")
+    && str_contains($plugin, 'YSSsSearchInput::register')
     && str_contains($pubCtrl, 'empty_result')
     && str_contains($search, 'function empty_result')
-    // B 模式結果頁同樣拒絕執行（v1.5.1 一致性）
-    && str_contains($read('src/Frontend/YSSsResultsPage.php'), 'YSSsInjectionGuard::is_attack')
+    && str_contains($read('src/Frontend/YSSsResultsPage.php'), 'YSSsSearchInput::inspect')
     // 建議縱深防禦
     && str_contains($queryRepo, 'array_filter'));
 
@@ -270,8 +273,8 @@ $check('C26 v1.5.0 version >= 1.5.0 + CHANGELOG records 1.5.0',
     && str_contains($log, '## [1.5.0]'));
 
 // C27 v1.5.1 結果頁防注入一致性 + 版本 + CHANGELOG
-$check('C27 v1.5.1 results-page injection guard + version >= 1.5.1 + CHANGELOG',
-    str_contains($read('src/Frontend/YSSsResultsPage.php'), 'YSSsInjectionGuard::is_attack')
+$check('C27 v1.5.1+ results-page raw-first guard + version >= 1.5.1 + CHANGELOG',
+    str_contains($read('src/Frontend/YSSsResultsPage.php'), 'YSSsSearchInput::inspect')
     && version_compare($vh[1] ?? '0', '1.5.1', '>=')
     && str_contains($log, '## [1.5.1]'));
 

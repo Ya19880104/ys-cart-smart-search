@@ -13,8 +13,8 @@ namespace YangSheep\SmartSearch\Api;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
-use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
+use YangSheep\SmartSearch\Security\YSSsSearchInput;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
@@ -30,7 +30,7 @@ final class YSSsPublicController {
 			'callback'            => [ $this, 'query' ],
 			'permission_callback' => '__return_true',
 			'args'                => [
-				'q' => [ 'type' => 'string', 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ],
+				'q' => [ 'type' => 'string', 'required' => true ],
 			],
 		] );
 
@@ -52,23 +52,16 @@ final class YSSsPublicController {
 			return new \WP_Error( 'ys_ss_rate_limited', __( '請求過於頻繁，請稍後再試。', 'ys-cart-smart-search' ), [ 'status' => 429 ] );
 		}
 
-		$q = (string) $request->get_param( 'q' );
-		$q = sanitize_text_field( wp_unslash( $q ) );
-		if ( '' === trim( $q ) ) {
-			return new \WP_Error( 'ys_ss_empty_query', __( '請輸入搜尋字詞。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
-		}
-		if ( function_exists( 'mb_substr' ) ) {
-			$q = mb_substr( $q, 0, 100, 'UTF-8' );
-		} else {
-			$q = substr( $q, 0, 100 );
-		}
-
-		// 防注入：辨識為攻擊探測（SSTI/XSS/穿越/SQLi/SSRF）即拒絕執行搜尋，回空結果
-		// （不報錯、不洩漏偵測，避免給攻擊者 oracle），且不記錄。
-		if ( YSSsInjectionGuard::is_attack( $q ) ) {
-			$response = rest_ensure_response( YSSsSearchService::empty_result( $q ) );
+		$input = YSSsSearchInput::inspect( $request->get_param( 'q' ) );
+		if ( $input['blocked'] ) {
+			$response = rest_ensure_response( YSSsSearchService::empty_result() );
 			$response->header( 'Cache-Control', 'no-store' );
 			return $response;
+		}
+
+		$q = $input['query'];
+		if ( '' === trim( $q ) ) {
+			return new \WP_Error( 'ys_ss_empty_query', __( '請輸入搜尋字詞。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
 		}
 
 		$result = YSSsSearchService::search( $q );
@@ -91,7 +84,12 @@ final class YSSsPublicController {
 			return new \WP_Error( 'ys_ss_rate_limited', __( '請求過於頻繁。', 'ys-cart-smart-search' ), [ 'status' => 429 ] );
 		}
 
-		$q = sanitize_text_field( wp_unslash( (string) $request->get_param( 'q' ) ) );
+		$input = YSSsSearchInput::inspect( $request->get_param( 'q' ) );
+		if ( $input['blocked'] ) {
+			return rest_ensure_response( [ 'ok' => true ] );
+		}
+
+		$q = $input['query'];
 		if ( '' === trim( $q ) ) {
 			return new \WP_Error( 'ys_ss_empty_query', 'empty', [ 'status' => 400 ] );
 		}

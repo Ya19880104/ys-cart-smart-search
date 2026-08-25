@@ -56,10 +56,11 @@ final class YSSsSearchService {
 		$groups = (array) apply_filters( 'ys_ss_result_groups', $groups, $norm );
 
 		return [
-			'q'        => $norm,
-			'total'    => $total,
-			'groups'   => $groups,
-			'view_all' => YSSsResultsPage::search_url( $norm ),
+			'q'           => $norm,
+			'total'       => $total,
+			'groups'      => $groups,
+			'view_all'    => YSSsResultsPage::search_url( $norm ),
+			'log_receipt' => '',
 		];
 	}
 
@@ -68,13 +69,13 @@ final class YSSsSearchService {
 	 *
 	 * @return array<string,mixed>
 	 */
-	public static function empty_result( string $q ): array {
-		$norm = YSSsQueryRepository::normalize( $q );
+	public static function empty_result(): array {
 		return [
-			'q'        => $norm,
-			'total'    => 0,
-			'groups'   => [],
-			'view_all' => YSSsResultsPage::search_url( $norm ),
+			'q'           => '',
+			'total'       => 0,
+			'groups'      => [],
+			'view_all'    => '',
+			'log_receipt' => '',
 		];
 	}
 

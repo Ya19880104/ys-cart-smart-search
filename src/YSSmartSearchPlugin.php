@@ -43,6 +43,7 @@ final class YSSmartSearchPlugin {
 		} );
 
 		// 前台
+		Security\YSSsSearchInput::register();
 		Frontend\YSSsShortcodes::register();
 		Frontend\YSSsResultsPage::register();
 
