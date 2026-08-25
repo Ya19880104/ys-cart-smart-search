@@ -7,7 +7,8 @@
 - 所有公開搜尋入口改為 **raw-first** 判定：REST query/log、A 模式商品 shortcode 與 B 模式
   結果頁都在任何有損清理或搜尋執行前檢查原始輸入。遭攔截的探測不查商品、不寫分析、
   不回顯 payload，並回既有中性空結果；正常 CJK、URL、Windows path、C++ `<vector>` 與
-  技術書名等字詞維持可搜尋。
+  技術書名等字詞維持可搜尋。A 模式只在核心商品 shortcode 執行期間保留已通過 gate 的
+  原字串，避免核心文字清理誤刪 `<vector>`；HTML event attribute 的空白與 `/` 分隔都會攔截。
 - 分析 `/log` 不再信任 client `total`：`/query` 以短效 HMAC receipt 綁定 query、visitor、
   server-calculated total 與實際搜尋範圍；缺失、竄改、過期或不相符的 receipt 維持相同
   `{ok:true}` 回應但零寫入，不新增 validity oracle。同訪客／同詞的 check-and-insert 以
@@ -15,6 +16,10 @@
 - 熱門建議在 cached、fresh 與 filter-final 三個出口都重新通過輸入 gate；每次失效發行不重用的
   128-bit epoch token，避免併發 invalidation 回退並讓 late writer 的舊 cache key 再次成為 current；
   `count=0` 不洩漏候選詞。
+- 分析寫入新增獨立 admission policy：已知 tracking/control query parameters、多組 UUID／hash／
+  高信心機器 token 只會被分析忽略，不會阻止商品搜尋；可辨識的人類零結果仍保留為商機。
+  自動熱門詞改以有結果事件（`hits - zero_hits`）資格與排序；瀏覽器最近搜尋也只在 matching
+  server proof 顯示有結果時記憶，快速送出、REST 失敗或零結果不會寫入 localStorage。
 - 後台逐詞刪除與「清除全部」共用 per-site maintenance lock；兩張分析表必須同為 InnoDB
   才執行交易，任一 DELETE／COMMIT 失敗即 rollback 並回固定安全錯誤，不外洩 SQL 或
   database detail。逾期清理達有界批次上限時不再假報完成，留待下次續跑。
@@ -26,6 +31,12 @@
 
 - exact／expired／all 清理均提供固定、可存取的狀態訊息；失敗會恢復控制、不 reload、也不
   顯示任意 server/network message。訊息 timer 會取消舊操作，避免舊成功提示抹掉新錯誤。
+
+### Compatibility
+
+- 前端每個搜尋表單使用單調 request sequence，舊的同字查詢回應不能覆蓋較新的結果或 receipt。
+- 搜尋、分析、receipt、手動關鍵字與摘要截字共用 Unicode-safe 字元截斷，不再依賴 byte-based
+  `substr()` fallback，也不要求 mbstring 才能保持合法 UTF-8。
 
 ### Security Boundary
 

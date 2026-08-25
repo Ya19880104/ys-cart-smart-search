@@ -33,7 +33,7 @@ final class YSSsInjectionGuard {
 
 		// XSS／HTML 執行面：攔危險元素與事件／srcdoc 屬性，不攔 C++ <vector> 等一般角括號。
 		if ( preg_match( '~<\s*/?\s*(?:script|svg|img|iframe|object|embed|link|meta|style|form|input|video|audio|body)\b~iu', $scan )
-			|| preg_match( '/<[^>\r\n]{0,512}\s(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
+			|| preg_match( '/<[^>\r\n]{0,512}(?:\s|\/)(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
 			return true;
 		}
 

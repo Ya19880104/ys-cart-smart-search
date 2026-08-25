@@ -7,6 +7,8 @@
 
 namespace YangSheep\SmartSearch\Database;
 
+use YangSheep\SmartSearch\Support\YSSsText;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YSSsKeywordRepository {
@@ -38,7 +40,7 @@ final class YSSsKeywordRepository {
 
 	public static function create( string $keyword, int $sort_order = 0 ): int {
 		global $wpdb;
-		$keyword = mb_substr( trim( $keyword ), 0, 100 );
+		$keyword = YSSsText::truncate_chars( trim( $keyword ), 100 );
 		if ( '' === $keyword ) {
 			return 0;
 		}
@@ -58,7 +60,7 @@ final class YSSsKeywordRepository {
 		global $wpdb;
 		$data = [];
 		if ( array_key_exists( 'keyword', $patch ) ) {
-			$kw = mb_substr( trim( (string) $patch['keyword'] ), 0, 100 );
+			$kw = YSSsText::truncate_chars( trim( (string) $patch['keyword'] ), 100 );
 			if ( '' === $kw ) {
 				return false;
 			}

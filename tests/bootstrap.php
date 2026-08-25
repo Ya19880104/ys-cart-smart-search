@@ -6,6 +6,18 @@ if (!defined('ABSPATH')) {
     define('ABSPATH', $ysss_test_root . DIRECTORY_SEPARATOR);
 }
 
+spl_autoload_register(static function (string $class) use ($ysss_test_root): void {
+    $prefix = 'YangSheep\\SmartSearch\\';
+    if (!str_starts_with($class, $prefix)) {
+        return;
+    }
+    $relative = str_replace('\\', DIRECTORY_SEPARATOR, substr($class, strlen($prefix)));
+    $path = $ysss_test_root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . $relative . '.php';
+    if (is_file($path)) {
+        require_once $path;
+    }
+});
+
 final class YSSsTestState
 {
     public static int $pass = 0;
@@ -395,9 +407,10 @@ if (!function_exists('sanitize_text_field')) {
     function sanitize_text_field(mixed $value): string
     {
         $text = is_scalar($value) ? (string) $value : '';
-        $text = strip_tags($text);
-        $text = (string) preg_replace('/%[a-f0-9]{2}/i', '', $text);
-        return trim((string) preg_replace('/[\r\n\t ]+/', ' ', $text));
+        $filtered = strip_tags($text);
+        $filtered = (string) preg_replace('/%[a-f0-9]{2}/i', '', $filtered);
+        $filtered = trim((string) preg_replace('/[\r\n\t ]+/', ' ', $filtered));
+        return (string) apply_filters('sanitize_text_field', $filtered, $text);
     }
 }
 

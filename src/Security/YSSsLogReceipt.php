@@ -9,6 +9,8 @@
 
 namespace YangSheep\SmartSearch\Security;
 
+use YangSheep\SmartSearch\Support\YSSsText;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YSSsLogReceipt {
@@ -103,9 +105,7 @@ final class YSSsLogReceipt {
 
 	private static function bounded_query( string $query ): string {
 		$query = trim( $query );
-		return function_exists( 'mb_substr' )
-			? mb_substr( $query, 0, 100, 'UTF-8' )
-			: substr( $query, 0, 100 );
+		return YSSsText::truncate_chars( $query, 100 );
 	}
 
 	private static function bounded_visitor( string $visitor_hash ): string {

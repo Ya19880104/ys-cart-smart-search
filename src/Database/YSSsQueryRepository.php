@@ -9,8 +9,9 @@
 
 namespace YangSheep\SmartSearch\Database;
 
-use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
+use YangSheep\SmartSearch\Analytics\YSSsAnalyticsAdmission;
 use YangSheep\SmartSearch\Security\YSSsSearchInput;
+use YangSheep\SmartSearch\Support\YSSsText;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -23,9 +24,10 @@ final class YSSsQueryRepository {
 		$q = trim( preg_replace( '/\s+/u', ' ', $q ) ?? '' );
 		if ( function_exists( 'mb_strtolower' ) ) {
 			$q = mb_strtolower( $q, 'UTF-8' );
-			return mb_substr( $q, 0, 100, 'UTF-8' );
+		} else {
+			$q = strtolower( $q );
 		}
-		return substr( strtolower( $q ), 0, 100 );
+		return YSSsText::truncate_chars( $q, 100 );
 	}
 
 	/**
@@ -41,10 +43,9 @@ final class YSSsQueryRepository {
 			return;
 		}
 
-		// 進站攔截（唯一寫入瓶頸）：攻擊探測（SSTI/XSS/穿越/SQLi/SSRF）一律不記錄，
-		// 避免污染分析與自動熱門建議。原始詞也一併檢查（normalize 不會移除注入標記，
-		// 但保險起見兩者都驗）。
-		if ( YSSsInjectionGuard::is_attack( $norm ) || YSSsInjectionGuard::is_attack( $raw ) ) {
+		// Analytics-only admission：搜尋本身由 prepared SQL／escaping 保護；這裡只拒絕攻擊、
+		// 已知 query parameters 與高信心機器亂數，避免污染報表與自動熱門詞。
+		if ( ! YSSsAnalyticsAdmission::should_record( $raw, $results_total ) ) {
 			return;
 		}
 
@@ -75,7 +76,7 @@ final class YSSsQueryRepository {
 
 			$wpdb->insert( $table, [
 				'query_norm'    => $norm,
-				'query_raw'     => mb_substr( trim( $raw ), 0, 150 ),
+				'query_raw'     => YSSsText::truncate_chars( trim( $raw ), 150 ),
 				'results_total' => max( 0, $results_total ),
 				'has_results'   => $results_total > 0 ? 1 : 0,
 				'content_types' => substr( $content_types, 0, 60 ),
@@ -256,7 +257,7 @@ final class YSSsQueryRepository {
 	}
 
 	/**
-	 * 自動熱門詞（建議用）：取樣窗內 hits Top、排除零結果率 > 80%。
+	 * 自動熱門詞（建議用）：只採有結果事件，以 positive hits 排序並排除零結果率 > 80%。
 	 *
 	 * @return array<int,string>
 	 */
@@ -271,8 +272,8 @@ final class YSSsQueryRepository {
 			"SELECT term FROM {$daily}
 			 WHERE stat_date >= %s
 			 GROUP BY term
-			 HAVING SUM(hits) > 0 AND ( SUM(zero_hits) / SUM(hits) ) <= 0.8
-			 ORDER BY SUM(hits) DESC
+			 HAVING SUM(hits) - SUM(zero_hits) > 0 AND ( SUM(zero_hits) / SUM(hits) ) <= 0.8
+			 ORDER BY SUM(hits) - SUM(zero_hits) DESC, SUM(zero_hits) ASC, term ASC
 			 LIMIT {$scan_limit}",
 			$from
 		) );
@@ -281,7 +282,7 @@ final class YSSsQueryRepository {
 		$accepted = [];
 		foreach ( array_map( 'strval', $rows ?: [] ) as $term ) {
 			$input = YSSsSearchInput::inspect( $term );
-			if ( $input['blocked'] || '' === $input['query'] ) {
+			if ( $input['blocked'] || '' === $input['query'] || ! YSSsAnalyticsAdmission::should_record( $term, 1 ) ) {
 				continue;
 			}
 			$accepted[] = $input['query'];

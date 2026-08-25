@@ -221,7 +221,7 @@ final class YSSsSettingsAdmin {
 						</div>
 					</div>
 					<div class="ysca-card__body inside">
-						<p class="description"><?php esc_html_e( '混合規則：手動關鍵字（依排序）優先，不足數量由自動統計補滿；自動統計排除高零結果詞。', 'ys-cart-smart-search' ); ?></p>
+						<p class="description"><?php esc_html_e( '混合規則：手動關鍵字（依排序）優先，不足數量由自動統計補滿；自動統計只採有結果事件並排除高零結果詞。', 'ys-cart-smart-search' ); ?></p>
 					</div>
 				</div>
 

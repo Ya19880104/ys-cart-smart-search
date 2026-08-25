@@ -227,6 +227,7 @@ $check('C23 v1.4.3 view_all mode-aware helper + write-path dedupe centralized in
 // ── v1.5.0（搜尋注入防護 + 後台清理）──
 $guard = $read('src/Security/YSSsInjectionGuard.php');
 $input = $read('src/Security/YSSsSearchInput.php');
+$admission = $read('src/Analytics/YSSsAnalyticsAdmission.php');
 
 // C24 防注入：單一真相源 is_attack + 進站攔截（log 瓶頸 + query 拒絕執行）+ 建議過濾
 $check('C24 v1.5.2 raw-first guard: centralized ingress + A/B/REST closure + suggestion defense',
@@ -236,9 +237,10 @@ $check('C24 v1.5.2 raw-first guard: centralized ingress + A/B/REST closure + sug
     && str_contains($input, 'class YSSsSearchInput')
     && str_contains($input, 'function inspect')
     && str_contains($input, 'pre_do_shortcode_tag')
-    // 唯一寫入瓶頸 log() 進站攔截
-    && str_contains($queryRepo, 'YSSsInjectionGuard::is_attack')
-    && preg_match('/is_attack\(\s*\$norm\s*\)\s*\|\|\s*YSSsInjectionGuard::is_attack\(\s*\$raw\s*\)/', $queryRepo)
+    // 唯一寫入瓶頸 log() 走 analytics admission；admission 再委派相同 raw input SOT
+    && str_contains($admission, 'class YSSsAnalyticsAdmission')
+    && str_contains($admission, 'YSSsSearchInput::inspect')
+    && str_contains($queryRepo, 'YSSsAnalyticsAdmission::should_record')
     // REST、A/list 與 B/page 共用 raw ingress，query route 不先 sanitize
     && str_contains($pubCtrl, 'YSSsSearchInput::inspect')
     && ! str_contains($pubCtrl, "'sanitize_callback' => 'sanitize_text_field'")

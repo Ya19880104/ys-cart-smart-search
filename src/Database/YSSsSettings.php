@@ -7,6 +7,8 @@
 
 namespace YangSheep\SmartSearch\Database;
 
+use YangSheep\SmartSearch\Support\YSSsText;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YSSsSettings {
@@ -131,7 +133,7 @@ final class YSSsSettings {
 			'show_price' => array_key_exists( 'show_price', $p ) ? ! empty( $p['show_price'] ) : true,
 			'show_sku'   => ! empty( $p['show_sku'] ),
 			'fields'     => $fields ?: [ 'name' ], // 至少保「名稱」避免空條件
-			'exclude'    => mb_substr( trim( (string) ( $p['exclude'] ?? '' ) ), 0, 2000 ),
+			'exclude'    => YSSsText::truncate_chars( trim( (string) ( $p['exclude'] ?? '' ) ), 2000 ),
 		];
 
 		$c = (array) ( $raw['categories'] ?? [] );

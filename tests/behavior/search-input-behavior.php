@@ -29,6 +29,7 @@ if (is_file($searchInputPath)) {
 
 /** @var array{blocked:array<string,string>,allowed:array<string,string>} $cases */
 $cases = require __DIR__ . '/../fixtures/search-input-cases.php';
+require_once __DIR__ . '/../fixtures/core-product-list-shortcode.php';
 
 foreach ($cases['blocked'] as $label => $input) {
     ysss_test("raw ingress blocks {$label}", static function () use ($input): void {
@@ -142,13 +143,31 @@ ysss_test('list mode blocks the core products shortcode before callback executio
     ysss_assert_false(str_contains($output, 'svg'), 'Blocked raw input was reflected');
 });
 
-ysss_test('list mode leaves legitimate core shortcode execution untouched', static function (): void {
+ysss_test('list mode preserves legitimate bytes through the core shortcode sanitizer', static function (): void {
     YSSsWpFake::reset();
     ysss_assert_true(class_exists(YSSsSearchInput::class), 'YSSsSearchInput is missing');
+    YSSsSearchInput::register();
     $_GET['ys_ec_search'] = 'C++ <vector> 入門';
     ysss_assert_same(false, YSSsSearchInput::pre_do_shortcode_tag(false, 'ys_ec_products', [], []));
+    $core = new \YangSheep\Ecommerce\Frontend\YSProductListShortcode();
+    ysss_assert_same('C++ <vector> 入門', $core->render(wp_unslash($_GET['ys_ec_search'])), 'Core sanitizer changed the allowed A-mode search');
+    ysss_assert_same('C++ 入門', sanitize_text_field(wp_unslash($_GET['ys_ec_search'])), 'A-mode preservation leaked beyond the core shortcode call stack');
     ysss_assert_same('already-rendered', YSSsSearchInput::pre_do_shortcode_tag('already-rendered', 'ys_ec_products', [], []));
     ysss_assert_same(false, YSSsSearchInput::pre_do_shortcode_tag(false, 'unrelated_shortcode', [], []));
+});
+
+ysss_test('list mode sanitizer bridge cannot leak after a later pre-filter short-circuit', static function (): void {
+    YSSsWpFake::reset();
+    YSSsSearchInput::register();
+    $_GET['ys_ec_search'] = 'C++ <vector> 入門';
+    add_filter('pre_do_shortcode_tag', static fn(): string => 'late-short-circuit', PHP_INT_MAX, 4);
+
+    ysss_assert_same('late-short-circuit', apply_filters('pre_do_shortcode_tag', false, 'ys_ec_products', [], []));
+    ysss_assert_same(
+        'C++ 入門',
+        sanitize_text_field(wp_unslash($_GET['ys_ec_search'])),
+        'Short-circuited shortcode leaked its sanitizer override into the request'
+    );
 });
 
 ysss_test('page mode blocks raw markup before search and analytics writes', static function (): void {

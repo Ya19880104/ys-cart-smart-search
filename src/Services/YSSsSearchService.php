@@ -14,6 +14,7 @@ namespace YangSheep\SmartSearch\Services;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
 use YangSheep\SmartSearch\Frontend\YSSsResultsPage;
+use YangSheep\SmartSearch\Support\YSSsText;
 use YangSheep\SmartSearch\YSSmartSearchDetector;
 
 defined( 'ABSPATH' ) || exit;
@@ -428,7 +429,7 @@ final class YSSsSearchService {
 			$excerpt = '';
 			if ( (int) $cfg['excerpt_len'] > 0 ) {
 				$excerpt = wp_strip_all_tags( get_the_excerpt( $post ) );
-				$excerpt = mb_substr( $excerpt, 0, (int) $cfg['excerpt_len'] );
+				$excerpt = YSSsText::truncate_chars( $excerpt, (int) $cfg['excerpt_len'] );
 			}
 			$items[] = [
 				'title'   => (string) get_the_title( $post ),

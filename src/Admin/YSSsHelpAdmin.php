@@ -109,7 +109,7 @@ final class YSSsHelpAdmin {
 				<h2 class="ys-ss-card__title">💡 <?php esc_html_e( '熱門搜尋建議怎麼運作', 'ys-cart-smart-search' ); ?></h2>
 				<ul class="ys-ss-help-list">
 					<li><?php esc_html_e( '混合式：手動關鍵字（依排序）優先顯示，不足設定數量時由「自動統計」補滿。', 'ys-cart-smart-search' ); ?></li>
-					<li><?php esc_html_e( '自動統計取樣窗可選 7／30／90 天，並自動排除零結果率過高（>80%）的詞。', 'ys-cart-smart-search' ); ?></li>
+					<li><?php esc_html_e( '自動統計取樣窗可選 7／30／90 天，只以有結果事件排名，並排除零結果率過高（>80%）的詞。', 'ys-cart-smart-search' ); ?></li>
 					<li><?php esc_html_e( '建議清單有 10 分鐘快取；修改手動關鍵字會立即重建。', 'ys-cart-smart-search' ); ?></li>
 					<li><?php esc_html_e( '「最近搜尋」只存在訪客瀏覽器（localStorage），不會上傳伺服器。', 'ys-cart-smart-search' ); ?></li>
 				</ul>

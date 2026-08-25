@@ -7,6 +7,7 @@
 
 namespace YangSheep\SmartSearch\Services;
 
+use YangSheep\SmartSearch\Analytics\YSSsAnalyticsAdmission;
 use YangSheep\SmartSearch\Database\YSSsKeywordRepository;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
@@ -127,9 +128,11 @@ final class YSSsSuggestService {
 			$term         = is_scalar( $record['term'] ?? null ) ? (string) $record['term'] : '';
 			$source_value = $record['source'] ?? 'auto';
 			$source       = is_scalar( $source_value ) ? sanitize_key( (string) $source_value ) : 'auto';
-			$input  = YSSsSearchInput::inspect( $term );
-			$norm   = YSSsQueryRepository::normalize( $input['query'] );
-			if ( $input['blocked'] || '' === $norm || isset( $seen[ $norm ] ) ) {
+			$input     = YSSsSearchInput::inspect( $term );
+			$norm      = YSSsQueryRepository::normalize( $input['query'] );
+			$is_manual = 'manual' === $source;
+			if ( $input['blocked'] || '' === $norm || isset( $seen[ $norm ] )
+				|| ( ! $is_manual && ! YSSsAnalyticsAdmission::should_record( $term, 1 ) ) ) {
 				continue;
 			}
 			$seen[ $norm ] = true;

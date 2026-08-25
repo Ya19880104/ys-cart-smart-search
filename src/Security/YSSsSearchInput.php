@@ -7,15 +7,19 @@
 
 namespace YangSheep\SmartSearch\Security;
 
+use YangSheep\SmartSearch\Support\YSSsText;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YSSsSearchInput {
 
 	private const MAX_RAW_BYTES   = 2048;
 	private const MAX_QUERY_CHARS = 100;
+	private const CORE_PRODUCT_LIST_CLASS = 'YangSheep\\Ecommerce\\Frontend\\YSProductListShortcode';
 
 	public static function register(): void {
-		add_filter( 'pre_do_shortcode_tag', [ self::class, 'pre_do_shortcode_tag' ], 10, 4 );
+		add_filter( 'pre_do_shortcode_tag', [ self::class, 'pre_do_shortcode_tag' ], PHP_INT_MAX, 4 );
+		add_filter( 'sanitize_text_field', [ self::class, 'preserve_core_search_query' ], 10, 2 );
 	}
 
 	/**
@@ -44,9 +48,7 @@ final class YSSsSearchInput {
 		if ( 1 !== preg_match( '//u', $query ) || YSSsInjectionGuard::is_attack( $query ) ) {
 			return self::blocked();
 		}
-		$query = function_exists( 'mb_substr' )
-			? mb_substr( $query, 0, self::MAX_QUERY_CHARS, 'UTF-8' )
-			: substr( $query, 0, self::MAX_QUERY_CHARS );
+		$query = YSSsText::truncate_chars( $query, self::MAX_QUERY_CHARS );
 
 		return [ 'blocked' => false, 'query' => $query ];
 	}
@@ -59,11 +61,15 @@ final class YSSsSearchInput {
 	 * @param array<int,string>   $match
 	 */
 	public static function pre_do_shortcode_tag( mixed $output, string $tag, array $attr, array $match ): mixed {
-		if ( false !== $output || 'ys_ec_products' !== $tag || ! array_key_exists( 'ys_ec_search', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( 'ys_ec_products' !== $tag ) {
+			return $output;
+		}
+		if ( false !== $output || ! array_key_exists( 'ys_ec_search', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			return $output;
 		}
 
-		$decision = self::inspect( wp_unslash( $_GET['ys_ec_search'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$raw      = wp_unslash( $_GET['ys_ec_search'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$decision = self::inspect( $raw );
 		if ( ! $decision['blocked'] ) {
 			return false;
 		}
@@ -71,6 +77,31 @@ final class YSSsSearchInput {
 		return '<div class="ys-ss-results ys-ss-results--neutral"><p class="ys-ss-results__hint">'
 			. esc_html__( '沒有符合的結果。', 'ys-cart-smart-search' )
 			. '</p></div>';
+	}
+
+	public static function preserve_core_search_query( mixed $filtered, mixed $raw ): string {
+		$fallback = is_string( $filtered ) ? $filtered : '';
+		if ( ! is_string( $raw ) || ! array_key_exists( 'ys_ec_search', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return $fallback;
+		}
+
+		$request_raw = wp_unslash( $_GET['ys_ec_search'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( ! is_scalar( $request_raw ) || (string) $request_raw !== $raw || ! self::is_core_product_list_call() ) {
+			return $fallback;
+		}
+
+		$decision = self::inspect( $raw );
+		return $decision['blocked'] ? $fallback : $decision['query'];
+	}
+
+	private static function is_core_product_list_call(): bool {
+		foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 8 ) as $frame ) {
+			if ( 'render' === ( $frame['function'] ?? '' )
+				&& self::CORE_PRODUCT_LIST_CLASS === ( $frame['class'] ?? '' ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -88,7 +119,7 @@ final class YSSsSearchInput {
 				$transforms = [
 					rawurldecode( $candidate ),
 					html_entity_decode( $candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
-					self::fold_security_width( $candidate ),
+					YSSsText::fold_fullwidth_ascii( $candidate ),
 				];
 				if ( class_exists( '\Normalizer' ) ) {
 					$normalized = \Normalizer::normalize( $candidate, \Normalizer::FORM_KC );
@@ -110,13 +141,6 @@ final class YSSsSearchInput {
 		}
 
 		return $candidates;
-	}
-
-	private static function fold_security_width( string $value ): string {
-		return strtr( $value, [
-			'％' => '%', '＜' => '<', '＞' => '>', '：' => ':', '／' => '/', '＼' => '\\',
-			'＄' => '$', '＃' => '#', '｛' => '{', '｝' => '}', '（' => '(', '）' => ')', '＝' => '=',
-		] );
 	}
 
 	/**

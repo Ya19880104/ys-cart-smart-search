@@ -6,6 +6,8 @@ return [
         'lossy SVG event payload' => '<svg onload=alert(1)>nova</svg>',
         'HTML image event payload' => '<img src=x onerror=alert(1)>',
         'HTML generic event payload' => '<div onmouseover=alert(1)>nova</div>',
+        'HTML slash event payload' => '<div/onmouseover=alert(1)>nova</div>',
+        'HTML slash toggle payload' => '<details/ontoggle=alert(1)>nova</details>',
         'SSTI double braces' => '{{7*7}}',
         'SSTI dollar expression' => '${7*7}',
         'SSTI hash expression' => '#{7*7}',

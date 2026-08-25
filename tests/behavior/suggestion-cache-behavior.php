@@ -26,6 +26,8 @@ ysss_test('cached suggestions pass through the final raw-input filter', static f
         'recent_enabled' => true,
         'items' => [
             ['term' => '{{7*7}}', 'source' => 'auto'],
+            ['term' => 'utm_source=bot', 'source' => 'auto'],
+            ['term' => 'utm_source=curated', 'source' => 'manual'],
             ['term' => 'nova', 'source' => 'auto'],
         ],
     ];
@@ -34,6 +36,7 @@ ysss_test('cached suggestions pass through the final raw-input filter', static f
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = $unsafe;
     $payload = YSSsSuggestService::suggestions();
     ysss_assert_same([
+        ['term' => 'utm_source=curated', 'source' => 'manual'],
         ['term' => 'nova', 'source' => 'auto'],
     ], $payload['items'] ?? null);
 });
@@ -159,4 +162,7 @@ ysss_test('auto terms overfetch before filtering and then backfill accepted rows
     ysss_assert_same(['nova', '羊毛外套'], YSSsQueryRepository::auto_terms(30, 2));
     $sql = $GLOBALS['wpdb']->queries[0] ?? '';
     ysss_assert_true((bool) preg_match('/\bLIMIT\s+(?:[3-9]|[1-9]\d+)/i', $sql), 'SQL did not overfetch beyond requested limit');
+    ysss_assert_true(str_contains($sql, 'SUM(hits) - SUM(zero_hits)'), 'Automatic terms are not qualified by positive-result events');
+    ysss_assert_true(str_contains($sql, 'ORDER BY SUM(hits) - SUM(zero_hits) DESC'), 'Automatic terms are still ranked by all searches instead of positive-result events');
+    ysss_assert_true(str_contains($sql, 'SUM(zero_hits) ASC, term ASC'), 'Positive-hit ties still reward noisier zero-result terms');
 });

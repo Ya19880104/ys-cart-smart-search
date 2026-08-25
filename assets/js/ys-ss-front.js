@@ -220,6 +220,8 @@
 	function doSearch(form, q) {
 		var panel = form.querySelector('.ys-ss-panel');
 		q = (q || '').trim();
+		form._ysSsRequestSeq = (form._ysSsRequestSeq || 0) + 1;
+		var requestSeq = form._ysSsRequestSeq;
 		clearTimeout(form._ysSsSettleTimer);
 		form._ysSsSettleTimer = null;
 		form._ysSsLogProof = null;
@@ -240,9 +242,14 @@
 				if (!data) { return; }
 				// 過期回應防護：只渲染目前輸入值的結果
 				var current = (form.querySelector('.ys-ss-input').value || '').trim();
-				if (current !== q) { return; }
+				if (current !== q || form._ysSsRequestSeq !== requestSeq) { return; }
 				if (data.q && data.log_receipt) {
-					form._ysSsLogProof = { input: q, query: data.q, receipt: data.log_receipt };
+					form._ysSsLogProof = {
+						input: q,
+						query: data.q,
+						receipt: data.log_receipt,
+						total: Math.max(0, Number(data.total) || 0)
+					};
 				}
 				renderResults(panel, form, q, data);
 
@@ -271,6 +278,7 @@
 			clearTimeout(form._ysSsSettleTimer);
 			form._ysSsSettleTimer = null;
 			form._ysSsLogProof = null;
+			form._ysSsRequestSeq = (form._ysSsRequestSeq || 0) + 1;
 		}
 		var run = debounce(function () {
 			if (!composing) { doSearch(form, input.value); }
@@ -292,10 +300,10 @@
 		form.addEventListener('submit', function () {
 			var q = input.value.trim();
 			if (!q) { return; }
-			// 最近搜尋是本機 UX，不依賴 analytics receipt；快速提交或 REST 失敗仍須保存。
-			recentPush(q);
 			var proof = form._ysSsLogProof;
 			if (!proof || proof.input !== q || !proof.receipt) { return; }
+			// 最近搜尋只記有實際結果且與目前輸入相符的 server proof；零結果仍保留分析價值。
+			if (proof.total > 0) { recentPush(q); }
 			// page 模式（獨立結果頁）：交由結果頁 server 端記錄，避免與此處雙記。
 			if (CFG.resultsMode !== 'page') {
 				logQuery(proof.query, proof.receipt, sourceOf(form));

@@ -171,7 +171,6 @@ ysss_test('query response and receipt share the same total upper bound', static 
 });
 
 ysss_test('receipt payload bound admits all individually valid claim maxima', static function (): void {
-    ysss_assert_true(function_exists('mb_substr'), 'Behavior suite requires the same mbstring support used by production');
     $query = str_repeat('😀', 100);
     $visitor = str_repeat('a', 64);
     $receipt = YSSsLogReceipt::issue($query, 1000000, 'products,categories,posts', $visitor);
