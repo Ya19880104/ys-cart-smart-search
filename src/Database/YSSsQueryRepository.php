@@ -10,6 +10,7 @@
 namespace YangSheep\SmartSearch\Database;
 
 use YangSheep\SmartSearch\Security\YSSsInjectionGuard;
+use YangSheep\SmartSearch\Security\YSSsSearchInput;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -49,30 +50,42 @@ final class YSSsQueryRepository {
 
 		$table = YSSsSchema::queries_table();
 		$vh    = substr( $visitor_hash, 0, 16 );
+		$lock  = 'ys_ss_log_' . substr( hash( 'sha256', $wpdb->prefix . '|' . $vh . '|' . $norm ), 0, 54 );
 
-		// 伺服器端去重：同訪客 + 同詞近 600 秒內已記錄則略過（用 norm_time 索引：同詞 600 秒
-		// 內列數極少，再濾 visitor_hash 很快）。避免下拉/結果頁雙記與重複呼叫灌水。
-		$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 600 );
-		$dup   = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT 1 FROM {$table} WHERE query_norm = %s AND created_at >= %s AND visitor_hash = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$norm,
-			$since,
-			$vh
-		) );
-		if ( $dup ) {
+		// GET_LOCK 將同訪客 + 同詞的 check-and-insert 串行化；鎖忙時分析旁路直接捨棄此次事件。
+		// 這避免兩個同 receipt 併發請求同時看到 miss 後雙寫。
+		$acquired = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock ) );
+		if ( 1 !== $acquired ) {
 			return;
 		}
 
-		$wpdb->insert( $table, [
-			'query_norm'    => $norm,
-			'query_raw'     => mb_substr( trim( $raw ), 0, 150 ),
-			'results_total' => max( 0, $results_total ),
-			'has_results'   => $results_total > 0 ? 1 : 0,
-			'content_types' => substr( $content_types, 0, 60 ),
-			'source'        => in_array( $source, [ 'bar', 'popup', 'page' ], true ) ? $source : 'bar',
-			'visitor_hash'  => $vh,
-			'created_at'    => current_time( 'mysql' ),
-		] );
+		try {
+			// 伺服器端去重：同訪客 + 同詞近 600 秒內已記錄則略過（用 norm_time 索引：同詞
+			// 600 秒內列數極少，再濾 visitor_hash 很快）。
+			$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 600 );
+			$dup   = (int) $wpdb->get_var( $wpdb->prepare(
+				"SELECT 1 FROM {$table} WHERE query_norm = %s AND created_at >= %s AND visitor_hash = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$norm,
+				$since,
+				$vh
+			) );
+			if ( $dup ) {
+				return;
+			}
+
+			$wpdb->insert( $table, [
+				'query_norm'    => $norm,
+				'query_raw'     => mb_substr( trim( $raw ), 0, 150 ),
+				'results_total' => max( 0, $results_total ),
+				'has_results'   => $results_total > 0 ? 1 : 0,
+				'content_types' => substr( $content_types, 0, 60 ),
+				'source'        => in_array( $source, [ 'bar', 'popup', 'page' ], true ) ? $source : 'bar',
+				'visitor_hash'  => $vh,
+				'created_at'    => current_time( 'mysql' ),
+			] );
+		} finally {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
+		}
 	}
 
 	/**
@@ -217,7 +230,8 @@ final class YSSsQueryRepository {
 		global $wpdb;
 		$daily = YSSsSchema::terms_daily_table();
 		$from  = gmdate( 'Y-m-d', strtotime( current_time( 'mysql' ) ) - $window_days * DAY_IN_SECONDS );
-		$limit = max( 1, min( 50, $limit ) );
+		$requested = max( 1, min( 50, $limit ) );
+		$scan_limit = min( 200, max( 50, $requested * 5 ) );
 
 		$rows = $wpdb->get_col( $wpdb->prepare(
 			"SELECT term FROM {$daily}
@@ -225,14 +239,24 @@ final class YSSsQueryRepository {
 			 GROUP BY term
 			 HAVING SUM(hits) > 0 AND ( SUM(zero_hits) / SUM(hits) ) <= 0.8
 			 ORDER BY SUM(hits) DESC
-			 LIMIT {$limit}",
+			 LIMIT {$scan_limit}",
 			$from
 		) );
 
-		// 縱深防禦：既有紀錄若含注入探測（清理前的殘留），絕不推上建議清單。
-		$rows = array_filter( array_map( 'strval', $rows ?: [] ), static fn( string $t ): bool => ! YSSsInjectionGuard::is_attack( $t ) );
+		// SQL 先有界 over-fetch，再以 raw-input SOT 過濾並於 accepted rows 補滿 requested limit。
+		$accepted = [];
+		foreach ( array_map( 'strval', $rows ?: [] ) as $term ) {
+			$input = YSSsSearchInput::inspect( $term );
+			if ( $input['blocked'] || '' === $input['query'] ) {
+				continue;
+			}
+			$accepted[] = $input['query'];
+			if ( count( $accepted ) >= $requested ) {
+				break;
+			}
+		}
 
-		return array_values( $rows );
+		return $accepted;
 	}
 
 	/**

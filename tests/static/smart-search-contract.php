@@ -246,8 +246,10 @@ $check('C24 v1.5.2 raw-first guard: centralized ingress + A/B/REST closure + sug
     && str_contains($pubCtrl, 'empty_result')
     && str_contains($search, 'function empty_result')
     && str_contains($read('src/Frontend/YSSsResultsPage.php'), 'YSSsSearchInput::inspect')
-    // 建議縱深防禦
-    && str_contains($queryRepo, 'array_filter'));
+    // 建議縱深防禦：bounded over-fetch 後走相同 input SOT，service 在 cache/filter 後 final gate
+    && str_contains($queryRepo, '$scan_limit')
+    && str_contains($queryRepo, 'YSSsSearchInput::inspect')
+    && str_contains($suggest, 'finalize_payload'));
 
 // C25 後台清理：單筆刪除（DELETE /term）+ 注入清理（mode=injection, 只刪攻擊列）+ 全清（保留）+ UI
 $check('C25 v1.5.0 admin cleanup: single delete-by-term + targeted injection purge + full clear + UI',

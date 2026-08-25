@@ -21,28 +21,30 @@ defined( 'ABSPATH' ) || exit;
 final class YSSsSearchService {
 
 	/**
-	 * @return array<string,mixed> { q, total, groups: [ {type,label,total,items[]} ] }
+	 * @return array<string,mixed> { q, total, groups: [ {type,label,total,items[]} ], content_types: string[] }
 	 */
 	public static function search( string $q ): array {
 		$settings = YSSsSettings::all();
 		$norm     = YSSsQueryRepository::normalize( $q );
 
-		$groups = [];
-		$total  = 0;
+		$groups         = [];
+		$searched_types = [];
 
 		if ( '' !== $norm ) {
 			foreach ( $settings['group_order'] as $type ) {
 				$group = null;
 				if ( 'products' === $type ) {
+					$searched_types[] = 'products';
 					$group = self::products_group( $norm, $settings['products'] );
 				} elseif ( 'categories' === $type && ! empty( $settings['categories']['enabled'] ) ) {
+					$searched_types[] = 'categories';
 					$group = self::categories_group( $norm, $settings['categories'] );
 				} elseif ( 'posts' === $type && ! empty( $settings['posts']['enabled'] ) ) {
+					$searched_types[] = 'posts';
 					$group = self::posts_group( $norm, $settings['posts'] );
 				}
 				if ( $group && $group['items'] ) {
 					$groups[] = $group;
-					$total   += (int) $group['total'];
 				}
 			}
 		}
@@ -54,13 +56,20 @@ final class YSSsSearchService {
 		 * @param string $norm
 		 */
 		$groups = (array) apply_filters( 'ys_ss_result_groups', $groups, $norm );
+		$total  = 0;
+		foreach ( $groups as $group ) {
+			if ( is_array( $group ) && ! empty( $group['items'] ) ) {
+				$total += max( 0, (int) ( $group['total'] ?? 0 ) );
+			}
+		}
 
 		return [
-			'q'           => $norm,
-			'total'       => $total,
-			'groups'      => $groups,
-			'view_all'    => YSSsResultsPage::search_url( $norm ),
-			'log_receipt' => '',
+			'q'             => $norm,
+			'total'         => $total,
+			'groups'        => $groups,
+			'content_types' => array_values( array_unique( $searched_types ) ),
+			'view_all'      => YSSsResultsPage::search_url( $norm ),
+			'log_receipt'   => '',
 		];
 	}
 

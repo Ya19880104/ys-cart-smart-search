@@ -111,11 +111,16 @@ final class YSSsFakeWpdb
     /** @var list<mixed> */
     public array $varResults = [];
 
+    /** @var null|Closure(string,self):mixed */
+    public ?Closure $getVarHandler = null;
+
     /** @var list<array<int,mixed>> */
     public array $resultSets = [];
 
     /** @var list<array<int,mixed>> */
     public array $columnSets = [];
+
+    public bool $respectColumnLimit = false;
 
     public function prepare(string $query, mixed ...$args): string
     {
@@ -157,13 +162,23 @@ final class YSSsFakeWpdb
     public function get_var(string $query): mixed
     {
         $this->queries[] = $query;
+        if (null !== $this->getVarHandler) {
+            return ($this->getVarHandler)($query, $this);
+        }
+        if (str_contains($query, 'GET_LOCK') || str_contains($query, 'RELEASE_LOCK')) {
+            return 1;
+        }
         return [] === $this->varResults ? 0 : array_shift($this->varResults);
     }
 
     public function get_col(string $query): array
     {
         $this->queries[] = $query;
-        return [] === $this->columnSets ? [] : (array) array_shift($this->columnSets);
+        $rows = [] === $this->columnSets ? [] : (array) array_shift($this->columnSets);
+        if ($this->respectColumnLimit && preg_match('/\bLIMIT\s+(\d+)/i', $query, $match)) {
+            $rows = array_slice($rows, 0, (int) $match[1]);
+        }
+        return $rows;
     }
 
     public function get_row(string $query, mixed $output = null): array

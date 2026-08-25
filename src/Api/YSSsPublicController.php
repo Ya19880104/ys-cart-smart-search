@@ -12,7 +12,7 @@
 namespace YangSheep\SmartSearch\Api;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
-use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsLogReceipt;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Security\YSSsSearchInput;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
@@ -65,6 +65,17 @@ final class YSSsPublicController {
 		}
 
 		$result = YSSsSearchService::search( $q );
+		$types  = array_values( array_filter(
+			(array) ( $result['content_types'] ?? [] ),
+			static fn( $type ): bool => is_string( $type ) && '' !== $type
+		) );
+		$result['total'] = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['total'] ?? 0 ) ) );
+		$result['log_receipt'] = YSSsLogReceipt::issue(
+			(string) ( $result['q'] ?? '' ),
+			(int) ( $result['total'] ?? 0 ),
+			implode( ',', array_values( array_unique( $types ) ) ),
+			YSSsRateLimiter::visitor_hash()
+		);
 
 		$response = rest_ensure_response( $result );
 		$response->header( 'Cache-Control', 'no-store' );
@@ -91,23 +102,24 @@ final class YSSsPublicController {
 
 		$q = $input['query'];
 		if ( '' === trim( $q ) ) {
-			return new \WP_Error( 'ys_ss_empty_query', 'empty', [ 'status' => 400 ] );
+			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
-		$total  = max( 0, min( 1000000, (int) $request->get_param( 'total' ) ) );
-		$source = 'popup' === (string) $request->get_param( 'source' ) ? 'popup' : 'bar';
-
-		$settings = YSSsSettings::all();
-		$types    = [ 'products' ];
-		if ( ! empty( $settings['categories']['enabled'] ) ) {
-			$types[] = 'categories';
+		$source_param  = $request->get_param( 'source' );
+		$receipt_param = $request->get_param( 'receipt' );
+		if ( ( null !== $source_param && ! is_string( $source_param ) ) || ! is_string( $receipt_param ) ) {
+			return rest_ensure_response( [ 'ok' => true ] );
 		}
-		if ( ! empty( $settings['posts']['enabled'] ) ) {
-			$types[] = 'posts';
+
+		$source  = 'popup' === $source_param ? 'popup' : 'bar';
+		$visitor = YSSsRateLimiter::visitor_hash();
+		$claims  = YSSsLogReceipt::verify( $receipt_param, $q, $visitor );
+		if ( null === $claims ) {
+			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
 		try {
-			YSSsQueryRepository::log( $q, $total, implode( ',', $types ), $source, YSSsRateLimiter::visitor_hash() );
+			YSSsQueryRepository::log( $claims['query'], $claims['total'], $claims['content_types'], $source, $visitor );
 		} catch ( \Throwable $e ) {
 			// 分析旁路：任何寫入失敗都不回錯誤給前台。
 		}

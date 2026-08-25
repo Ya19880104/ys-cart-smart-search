@@ -41,6 +41,27 @@ foreach ($behaviorFiles as $behaviorFile) {
     }
 }
 
+$jsFiles = glob(__DIR__ . '/js/*.js');
+if (false === $jsFiles) {
+    $jsFiles = [];
+}
+sort($jsFiles, SORT_STRING);
+
+foreach ($jsFiles as $jsFile) {
+    $label = str_replace('\\', '/', substr($jsFile, strlen(__DIR__) + 1));
+    ysss_test($label, static function () use ($jsFile): void {
+        if (!function_exists('exec')) {
+            throw new RuntimeException('PHP exec() is unavailable for Node behavior tests');
+        }
+        $output = [];
+        $status = 0;
+        exec('node ' . escapeshellarg($jsFile) . ' 2>&1', $output, $status);
+        if (0 !== $status) {
+            throw new RuntimeException(implode("\n", $output));
+        }
+    });
+}
+
 echo sprintf(
     "\nYS Smart Search test summary: PASS=%d FAIL=%d\n",
     YSSsTestState::$pass,

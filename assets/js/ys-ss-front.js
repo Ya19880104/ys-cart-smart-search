@@ -64,9 +64,9 @@
 	}
 
 	/** 行為紀錄（fire-and-forget；同詞 10 分鐘去重）。 */
-	function logQuery(term, total, source) {
+	function logQuery(term, receipt, source) {
 		var norm = (term || '').trim().toLowerCase();
-		if (norm.length < 1) { return; }
+		if (norm.length < 1 || typeof receipt !== 'string' || !receipt) { return; }
 		try {
 			var map = JSON.parse(sessionStorage.getItem(LOGGED_KEY) || '{}');
 			var now = Date.now();
@@ -75,7 +75,7 @@
 			sessionStorage.setItem(LOGGED_KEY, JSON.stringify(map));
 		} catch (e) { /* 仍嘗試送出 */ }
 
-		var payload = JSON.stringify({ q: term, total: total, source: source });
+		var payload = JSON.stringify({ q: term, receipt: receipt, source: source });
 		var url = CFG.restUrl + '/log';
 		if (navigator.sendBeacon) {
 			navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
@@ -131,6 +131,8 @@
 	function renderResults(panel, form, q, data) {
 		panel.textContent = '';
 		var groups = (data && data.groups) || [];
+		var logTerm = (data && data.q) || '';
+		var receipt = (data && data.log_receipt) || '';
 
 		if (!groups.length) {
 			var empty = el('div', 'ys-ss-empty');
@@ -165,7 +167,7 @@
 				var a = el('a', 'ys-ss-item');
 				a.href = item.url;
 				a.setAttribute('role', 'option');
-				a.addEventListener('click', function () { logQuery(q, data.total, sourceOf(form)); });
+				a.addEventListener('click', function () { logQuery(logTerm, receipt, sourceOf(form)); });
 
 				if (item.image) {
 					var img = el('img', 'ys-ss-item__img');
@@ -203,7 +205,7 @@
 
 		var all = el('a', 'ys-ss-viewall', CFG.i18n.viewAll);
 		all.href = data.view_all || CFG.shopUrl;
-		all.addEventListener('click', function () { logQuery(q, data.total, sourceOf(form)); });
+		all.addEventListener('click', function () { logQuery(logTerm, receipt, sourceOf(form)); });
 		panel.appendChild(all);
 
 		panel.hidden = false;
@@ -215,11 +217,12 @@
 		return form.getAttribute('data-ys-ss-source') === 'popup' ? 'popup' : 'bar';
 	}
 
-	var settleTimer = null;
-
 	function doSearch(form, q) {
 		var panel = form.querySelector('.ys-ss-panel');
 		q = (q || '').trim();
+		clearTimeout(form._ysSsSettleTimer);
+		form._ysSsSettleTimer = null;
+		form._ysSsLogProof = null;
 
 		if (!q) {
 			renderSuggest(panel, form);
@@ -238,13 +241,20 @@
 				// 過期回應防護：只渲染目前輸入值的結果
 				var current = (form.querySelector('.ys-ss-input').value || '').trim();
 				if (current !== q) { return; }
+				if (data.q && data.log_receipt) {
+					form._ysSsLogProof = { input: q, query: data.q, receipt: data.log_receipt };
+				}
 				renderResults(panel, form, q, data);
 
 				// 停頓紀錄：1.2 秒沒有新輸入且 ≥2 字
-				clearTimeout(settleTimer);
-				if (q.length >= 2) {
-					settleTimer = setTimeout(function () {
-						logQuery(q, data.total, sourceOf(form));
+				clearTimeout(form._ysSsSettleTimer);
+				if (q.length >= 2 && form._ysSsLogProof) {
+					var proof = form._ysSsLogProof;
+					form._ysSsSettleTimer = setTimeout(function () {
+						form._ysSsSettleTimer = null;
+						if (form._ysSsLogProof === proof) {
+							logQuery(proof.query, proof.receipt, sourceOf(form));
+						}
 					}, 1200);
 				}
 			})
@@ -257,13 +267,24 @@
 		if (!input || !panel) { return; }
 
 		var composing = false;
+		function cancelPendingLog() {
+			clearTimeout(form._ysSsSettleTimer);
+			form._ysSsSettleTimer = null;
+			form._ysSsLogProof = null;
+		}
 		var run = debounce(function () {
 			if (!composing) { doSearch(form, input.value); }
 		}, 250);
 
-		input.addEventListener('compositionstart', function () { composing = true; });
+		input.addEventListener('compositionstart', function () {
+			cancelPendingLog();
+			composing = true;
+		});
 		input.addEventListener('compositionend', function () { composing = false; run(); });
-		input.addEventListener('input', run);
+		input.addEventListener('input', function () {
+			cancelPendingLog();
+			run();
+		});
 		input.addEventListener('focus', function () {
 			if (!input.value.trim()) { renderSuggest(panel, form); } else { doSearch(form, input.value); }
 		});
@@ -271,10 +292,12 @@
 		form.addEventListener('submit', function () {
 			var q = input.value.trim();
 			if (!q) { return; }
+			var proof = form._ysSsLogProof;
+			if (!proof || proof.input !== q || !proof.receipt) { return; }
 			recentPush(q);
 			// page 模式（獨立結果頁）：交由結果頁 server 端記錄，避免與此處雙記。
 			if (CFG.resultsMode !== 'page') {
-				logQuery(q, panel.querySelectorAll('.ys-ss-item').length, sourceOf(form));
+				logQuery(proof.query, proof.receipt, sourceOf(form));
 			}
 			// 交給原生 GET 導向結果頁／商店頁
 		});
