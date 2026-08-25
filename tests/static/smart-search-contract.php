@@ -291,7 +291,13 @@ $check('C27 v1.5.1+ results-page raw-first guard + version >= 1.5.1 + CHANGELOG'
     && version_compare($vh[1] ?? '0', '1.5.1', '>=')
     && str_contains($log, '## [1.5.1]'));
 
-echo "\nv1.5.1 contract: PASS={$pass} FAIL={$fail}\n";
+// C28 v1.5.2 候選 metadata + release notes
+$check('C28 v1.5.2 exact metadata + CHANGELOG',
+    '1.5.2' === ($vh[1] ?? '')
+    && '1.5.2' === ($vc[1] ?? '')
+    && str_contains($log, '## [1.5.2]'));
+
+echo "\nv1.5.2 contract: PASS={$pass} FAIL={$fail}\n";
 if ($fail > 0) {
     throw new RuntimeException("ys-cart-smart-search contract FAILED ({$fail})");
 }

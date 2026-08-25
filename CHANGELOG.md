@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.5.2] - 2026-08-26 — 搜尋入口與分析資料完整性收斂
+
+### Security / Integrity
+
+- 所有公開搜尋入口改為 **raw-first** 判定：REST query/log、A 模式商品 shortcode 與 B 模式
+  結果頁都在任何有損清理或搜尋執行前檢查原始輸入。遭攔截的探測不查商品、不寫分析、
+  不回顯 payload，並回既有中性空結果；正常 CJK、URL、Windows path、C++ `<vector>` 與
+  技術書名等字詞維持可搜尋。
+- 分析 `/log` 不再信任 client `total`：`/query` 以短效 HMAC receipt 綁定 query、visitor、
+  server-calculated total 與實際搜尋範圍；缺失、竄改、過期或不相符的 receipt 維持相同
+  `{ok:true}` 回應但零寫入，不新增 validity oracle。同訪客／同詞的 check-and-insert 以
+  advisory lock 串行化，避免併發重播雙寫。
+- 熱門建議在 cached、fresh 與 filter-final 三個出口都重新通過輸入 gate；generation-based
+  cache key 防止失效後的 late writer 覆蓋新世代，`count=0` 不洩漏候選詞。
+- 後台逐詞刪除與「清除全部」共用 per-site maintenance lock；兩張分析表必須同為 InnoDB
+  才執行交易，任一 DELETE／COMMIT 失敗即 rollback 並回固定安全錯誤，不外洩 SQL 或
+  database detail。逾期清理達有界批次上限時不再假報完成，留待下次續跑。
+- 歷史 heuristic「自動掃描並刪除注入紀錄」已從 repository 與 UI 實體退役；legacy
+  `mode=injection` 固定回 409 `ys_ss_preview_required` 且零 mutation。缺少或未知 purge mode
+  固定回 400，不再落入破壞性的 expired 預設。
+
+### Admin UX
+
+- exact／expired／all 清理均提供固定、可存取的狀態訊息；失敗會恢復控制、不 reload、也不
+  顯示任意 server/network message。訊息 timer 會取消舊操作，避免舊成功提示抹掉新錯誤。
+
+### Security Boundary
+
+- SQL injection 與輸出 XSS 的正式邊界仍是 prepared SQL、WordPress escaping 與 DOM
+  `textContent`。輸入 classifier 是搜尋拒絕執行與分析防污染的 abuse control，不取代這些
+  邊界，也不宣稱僅靠 pattern matching 能處理任意攻擊。
+
+### Operational Note
+
+- 為保證兩表可回滾，「清除全部」使用單一 InnoDB transaction 的兩個 DELETE；對異常龐大
+  的分析資料集可能產生較長 undo／lock 時間。大型 timeout-safe maintenance job 不在本版範圍。
+
 ## [1.5.1] - 2026-08-25 — 結果頁防注入一致性
 
 ### Security
