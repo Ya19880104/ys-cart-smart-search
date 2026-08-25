@@ -114,6 +114,12 @@ final class YSSsFakeWpdb
     /** @var null|Closure(string,self):mixed */
     public ?Closure $getVarHandler = null;
 
+    /** @var null|Closure(string,self):int|false */
+    public ?Closure $queryHandler = null;
+
+    /** @var null|Closure(string,mixed,self):array */
+    public ?Closure $getResultsHandler = null;
+
     /** @var list<array<int,mixed>> */
     public array $resultSets = [];
 
@@ -156,6 +162,15 @@ final class YSSsFakeWpdb
     public function get_results(string $query, mixed $output = null): array
     {
         $this->queries[] = $query;
+        if (null !== $this->getResultsHandler) {
+            return (array) ($this->getResultsHandler)($query, $output, $this);
+        }
+        if (str_contains($query, 'information_schema.TABLES')) {
+            return [
+                ['TABLE_NAME' => $this->prefix . 'ys_ss_queries', 'ENGINE' => 'InnoDB'],
+                ['TABLE_NAME' => $this->prefix . 'ys_ss_terms_daily', 'ENGINE' => 'InnoDB'],
+            ];
+        }
         return [] === $this->resultSets ? [] : (array) array_shift($this->resultSets);
     }
 
@@ -196,6 +211,9 @@ final class YSSsFakeWpdb
     public function query(string $query): int|false
     {
         $this->queries[] = $query;
+        if (null !== $this->queryHandler) {
+            return ($this->queryHandler)($query, $this);
+        }
         return 1;
     }
 }

@@ -19,8 +19,6 @@
 		});
 	}
 
-	function esc(s) { return String(s == null ? '' : s); }
-
 	/* ═════════ 設定頁 ═════════ */
 
 	function initSettings() {
@@ -29,6 +27,21 @@
 
 		var saveBtn = document.getElementById('ys-ss-save');
 		var saveMsg = document.getElementById('ys-ss-save-msg');
+		var saveMsgTimer = 0;
+
+		function showSettingsMessage(message, clearAfter) {
+			if (saveMsgTimer) {
+				clearTimeout(saveMsgTimer);
+				saveMsgTimer = 0;
+			}
+			saveMsg.textContent = message;
+			if (clearAfter) {
+				saveMsgTimer = setTimeout(function () {
+					if (message === saveMsg.textContent) { saveMsg.textContent = ''; }
+					saveMsgTimer = 0;
+				}, clearAfter);
+			}
+		}
 
 		function collect() {
 			var out = {};
@@ -64,13 +77,12 @@
 
 		saveBtn.addEventListener('click', function () {
 			saveBtn.disabled = true;
-			saveMsg.textContent = '儲存中…';
+			showSettingsMessage('儲存中…');
 			api('/settings', { method: 'POST', body: JSON.stringify(collect()) })
-				.then(function () { saveMsg.textContent = '✓ 已儲存'; })
-				.catch(function (e) { saveMsg.textContent = '儲存失敗：' + esc(e && e.message); })
+				.then(function () { showSettingsMessage('✓ 已儲存', 2500); })
+				.catch(function () { showSettingsMessage('儲存失敗，請稍後再試。'); })
 				.finally(function () {
 					saveBtn.disabled = false;
-					setTimeout(function () { saveMsg.textContent = ''; }, 2500);
 				});
 		});
 
@@ -147,19 +159,33 @@
 			return Number(c.queries).toLocaleString() + ' 筆原始 / ' + Number(c.daily).toLocaleString() + ' 筆彙總';
 		}
 
-		document.getElementById('ys-ss-purge-expired').addEventListener('click', function () {
+		var purgeExpiredBtn = document.getElementById('ys-ss-purge-expired');
+		purgeExpiredBtn.addEventListener('click', function () {
+			purgeExpiredBtn.disabled = true;
+			showSettingsMessage('清理中…');
 			api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'expired' }) }).then(function (d) {
 				counts.textContent = fmtCounts(d.counts);
-				saveMsg.textContent = '已清理 ' + d.deleted + ' 筆逾期資料';
-				setTimeout(function () { saveMsg.textContent = ''; }, 3000);
+				showSettingsMessage('已清理 ' + d.deleted + ' 筆逾期資料', 3000);
+			}).catch(function () {
+				showSettingsMessage('清理失敗，請稍後再試。');
+			}).finally(function () {
+				purgeExpiredBtn.disabled = false;
 			});
 		});
 
-		document.getElementById('ys-ss-purge-all').addEventListener('click', function () {
+		var purgeAllBtn = document.getElementById('ys-ss-purge-all');
+		purgeAllBtn.addEventListener('click', function () {
 			var code = window.prompt('此操作將刪除全部搜尋分析資料且無法復原。\n請輸入 DELETE 確認：');
 			if ('DELETE' !== (code || '').trim()) { return; }
+			purgeAllBtn.disabled = true;
+			showSettingsMessage('清理中…');
 			api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'all', confirm: 'DELETE' }) }).then(function (d) {
 				counts.textContent = fmtCounts(d.counts);
+				showSettingsMessage('已清除全部搜尋分析資料。', 3000);
+			}).catch(function () {
+				showSettingsMessage('清理失敗，請稍後再試。');
+			}).finally(function () {
+				purgeAllBtn.disabled = false;
 			});
 		});
 	}
@@ -172,6 +198,23 @@
 
 		var fromInput = document.getElementById('ys-ss-from');
 		var toInput = document.getElementById('ys-ss-to');
+		var actionMsg = document.getElementById('ys-ss-action-msg');
+		var actionMsgTimer = 0;
+
+		function showActionMessage(message, clearAfter) {
+			if (actionMsgTimer) {
+				clearTimeout(actionMsgTimer);
+				actionMsgTimer = 0;
+			}
+			if (!actionMsg) { return; }
+			actionMsg.textContent = message;
+			if (clearAfter) {
+				actionMsgTimer = setTimeout(function () {
+					if (message === actionMsg.textContent) { actionMsg.textContent = ''; }
+					actionMsgTimer = 0;
+				}, clearAfter);
+			}
+		}
 
 		function fmtDate(d) {
 			return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -229,9 +272,20 @@
 		function deleteTerm(term, btn) {
 			if (!window.confirm('刪除關鍵字「' + term + '」的全部搜尋紀錄？此操作無法復原。')) { return; }
 			if (btn) { btn.disabled = true; }
+			showActionMessage('');
 			api('/term?term=' + encodeURIComponent(term), { method: 'DELETE' })
-				.then(function () { load(curFrom, curTo); })
-				.catch(function () { if (btn) { btn.disabled = false; } });
+				.then(function (d) {
+					var total = parseInt(d && d.deleted && d.deleted.total, 10);
+					if (!Number.isFinite(total) || total < 0) { total = 0; }
+					showActionMessage('已刪除 ' + total + ' 筆搜尋紀錄。', 4000);
+					load(curFrom, curTo);
+				})
+				.catch(function (e) {
+					if (btn) { btn.disabled = false; }
+					showActionMessage(e && 'ys_ss_analytics_busy' === e.code
+							? '搜尋分析正在更新，請稍後再試。'
+							: '刪除失敗，請稍後再試。');
+				});
 		}
 
 		/* 刪除鈕（垃圾桶）：排行每列共用。 */
@@ -330,25 +384,6 @@
 				load(fromInput.value, toInput.value);
 			}
 		});
-
-		/* 清除注入/攻擊探測紀錄（只刪攻擊列、保留正常搜尋）。 */
-		var purgeInjBtn = document.getElementById('ys-ss-purge-injection');
-		var purgeMsg = document.getElementById('ys-ss-purge-msg');
-		if (purgeInjBtn) {
-			purgeInjBtn.addEventListener('click', function () {
-				if (!window.confirm('掃描並刪除注入/攻擊探測搜尋紀錄？只會清除攻擊列，正常搜尋（含正常零結果）保留。')) { return; }
-				purgeInjBtn.disabled = true;
-				if (purgeMsg) { purgeMsg.textContent = '掃描中…'; }
-				api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'injection' }) })
-					.then(function (d) {
-						if (purgeMsg) { purgeMsg.textContent = '已清除 ' + d.deleted + ' 筆注入紀錄'; }
-						load(curFrom, curTo);
-						setTimeout(function () { if (purgeMsg) { purgeMsg.textContent = ''; } }, 4000);
-					})
-					.catch(function () { if (purgeMsg) { purgeMsg.textContent = '清除失敗'; } })
-					.then(function () { purgeInjBtn.disabled = false; });
-			});
-		}
 
 		/* 預設 30 天 */
 		var to = new Date();

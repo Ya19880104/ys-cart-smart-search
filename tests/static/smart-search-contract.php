@@ -251,23 +251,34 @@ $check('C24 v1.5.2 raw-first guard: centralized ingress + A/B/REST closure + sug
     && str_contains($queryRepo, 'YSSsSearchInput::inspect')
     && str_contains($suggest, 'finalize_payload'));
 
-// C25 後台清理：單筆刪除（DELETE /term）+ 注入清理（mode=injection, 只刪攻擊列）+ 全清（保留）+ UI
-$check('C25 v1.5.0 admin cleanup: single delete-by-term + targeted injection purge + full clear + UI',
-    // repo 方法
-    str_contains($queryRepo, 'function delete_term')
-    && str_contains($queryRepo, 'function purge_injection')
-    && str_contains($queryRepo, 'function purge_all')            // 全清仍在（一次清理所有紀錄）
-    // admin 端點
+// C25 v1.5.2 後台清理：精確刪詞原子化；heuristic injection bulk-delete 退役；全清保留。
+$adminJs = $read('assets/js/ys-ss-admin.js');
+$check('C25 v1.5.2 safe admin cleanup: atomic exact delete + retired heuristic purge + full clear',
+	str_contains($queryRepo, 'function delete_term')
+	&& ! str_contains($queryRepo, 'function purge_injection')
+	&& ! str_contains($queryRepo, 'TRUNCATE TABLE')
+	&& str_contains($queryRepo, 'START TRANSACTION')
+	&& str_contains($queryRepo, "false === \$dq")
+	&& str_contains($queryRepo, "false === \$dd")
+	&& str_contains($queryRepo, 'COMMIT')
+	&& str_contains($queryRepo, 'ROLLBACK')
+	&& str_contains($queryRepo, 'GET_LOCK')
+	&& str_contains($queryRepo, 'assert_transactional_tables')
+	&& str_contains($queryRepo, 'information_schema.TABLES')
+	&& str_contains($queryRepo, 'function purge_all')
     && str_contains($admCtrl, "\$base . '/term'")
     && str_contains($admCtrl, 'function delete_term')
     && str_contains($admCtrl, "'injection' === \$mode")
+    && str_contains($admCtrl, 'ys_ss_preview_required')
     && str_contains($admCtrl, 'WP_REST_Server::DELETABLE')
-    // 端點仍受 nonce+capability 保護（沿用 permission_admin）
-    && str_contains($admCtrl, "'permission_callback' => [ \$this, 'permission_admin' ]")
-    // 分析頁 UI：清除注入鈕 + 零結果表刪除欄
-    && str_contains($analytics, 'ys-ss-purge-injection')
-    && str_contains($frontJs === '' ? '' : $read('assets/js/ys-ss-admin.js'), 'deleteTerm')
-    && str_contains($read('assets/js/ys-ss-admin.js'), "mode: 'injection'"));
+	&& str_contains($admCtrl, "'permission_callback' => [ \$this, 'permission_admin' ]")
+	&& ! str_contains($analytics, 'ys-ss-purge-injection')
+	&& str_contains($analytics, 'ys-ss-action-msg')
+	&& str_contains($adminJs, 'deleteTerm')
+	&& str_contains($adminJs, 'ys-ss-action-msg')
+	&& str_contains($adminJs, "method: 'DELETE'")
+	&& str_contains($adminJs, '清理失敗，請稍後再試。')
+	&& ! str_contains($adminJs, "mode: 'injection'"));
 
 // C26 v1.5.0 版本 + CHANGELOG
 $check('C26 v1.5.0 version >= 1.5.0 + CHANGELOG records 1.5.0',

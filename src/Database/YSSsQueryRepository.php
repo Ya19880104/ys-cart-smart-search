@@ -100,21 +100,26 @@ final class YSSsQueryRepository {
 	 * 將指定日期（站台時區）的原始紀錄彙總進 terms_daily（冪等，可重跑）。
 	 */
 	public static function rollup_date( string $date ): void {
-		global $wpdb;
-		$queries = YSSsSchema::queries_table();
-		$daily   = YSSsSchema::terms_daily_table();
+		self::with_maintenance_lock( static function () use ( $date ): void {
+			global $wpdb;
+			$queries = YSSsSchema::queries_table();
+			$daily   = YSSsSchema::terms_daily_table();
 
-		$wpdb->query( $wpdb->prepare(
-			"INSERT INTO {$daily} (term, stat_date, hits, zero_hits)
-			 SELECT query_norm, %s, COUNT(*), SUM(CASE WHEN has_results = 0 THEN 1 ELSE 0 END)
-			 FROM {$queries}
-			 WHERE created_at >= %s AND created_at < %s
-			 GROUP BY query_norm
-			 ON DUPLICATE KEY UPDATE hits = VALUES(hits), zero_hits = VALUES(zero_hits)",
-			$date,
-			$date . ' 00:00:00',
-			gmdate( 'Y-m-d', strtotime( $date . ' +1 day' ) ) . ' 00:00:00'
-		) );
+			$result = $wpdb->query( $wpdb->prepare(
+				"INSERT INTO {$daily} (term, stat_date, hits, zero_hits)
+				 SELECT query_norm, %s, COUNT(*), SUM(CASE WHEN has_results = 0 THEN 1 ELSE 0 END)
+				 FROM {$queries}
+				 WHERE created_at >= %s AND created_at < %s
+				 GROUP BY query_norm
+				 ON DUPLICATE KEY UPDATE hits = VALUES(hits), zero_hits = VALUES(zero_hits)",
+				$date,
+				$date . ' 00:00:00',
+				gmdate( 'Y-m-d', strtotime( $date . ' +1 day' ) ) . ' 00:00:00'
+			) );
+			if ( false === $result ) {
+				throw YSSsAnalyticsMutationException::database_failure();
+			}
+		} );
 	}
 
 	/**
@@ -125,36 +130,65 @@ final class YSSsQueryRepository {
 			return 0;
 		}
 
-		global $wpdb;
-		$cutoff_dt   = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - $days * DAY_IN_SECONDS );
-		$cutoff_date = substr( $cutoff_dt, 0, 10 );
-		$queries     = YSSsSchema::queries_table();
-		$daily       = YSSsSchema::terms_daily_table();
-		$deleted     = 0;
+		return self::with_maintenance_lock( static function () use ( $days ): int {
+			global $wpdb;
+			$cutoff_dt   = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - $days * DAY_IN_SECONDS );
+			$cutoff_date = substr( $cutoff_dt, 0, 10 );
+			$queries     = YSSsSchema::queries_table();
+			$daily       = YSSsSchema::terms_daily_table();
+			$deleted     = 0;
+			$complete    = false;
 
-		for ( $i = 0; $i < 200; $i++ ) {
-			$n = (int) $wpdb->query( $wpdb->prepare(
-				"DELETE FROM {$queries} WHERE created_at < %s LIMIT 5000",
-				$cutoff_dt
-			) );
-			$deleted += $n;
-			if ( $n < 5000 ) {
-				break;
+			for ( $i = 0; $i < 200; $i++ ) {
+				$result = $wpdb->query( $wpdb->prepare(
+					"DELETE FROM {$queries} WHERE created_at < %s LIMIT 5000",
+					$cutoff_dt
+				) );
+				if ( false === $result ) {
+					throw YSSsAnalyticsMutationException::database_failure();
+				}
+				$n        = (int) $result;
+				$deleted += $n;
+				if ( $n < 5000 ) {
+					$complete = true;
+					break;
+				}
 			}
-		}
 
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE stat_date < %s", $cutoff_date ) );
+			// A full final batch cannot prove that the bounded cleanup reached the end. Fail honestly;
+			// the next cron/admin run resumes from the remaining rows before touching daily aggregates.
+			if ( ! $complete ) {
+				throw YSSsAnalyticsMutationException::database_failure();
+			}
 
-		return $deleted;
+			$daily_deleted = $wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE stat_date < %s", $cutoff_date ) );
+			if ( false === $daily_deleted ) {
+				throw YSSsAnalyticsMutationException::database_failure();
+			}
+
+			return $deleted + (int) $daily_deleted;
+		} );
 	}
 
 	/**
 	 * 全清（設定頁「清除全部分析資料」）。
 	 */
 	public static function purge_all(): void {
-		global $wpdb;
-		$wpdb->query( 'TRUNCATE TABLE ' . YSSsSchema::queries_table() );      // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-		$wpdb->query( 'TRUNCATE TABLE ' . YSSsSchema::terms_daily_table() ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		self::with_maintenance_lock( static function (): void {
+			global $wpdb;
+			$queries = YSSsSchema::queries_table();
+			$daily   = YSSsSchema::terms_daily_table();
+			self::assert_transactional_tables( $queries, $daily );
+
+			self::with_transaction( static function () use ( $wpdb, $queries, $daily ): void {
+				if ( false === $wpdb->query( "DELETE FROM {$queries}" ) ) { // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					throw YSSsAnalyticsMutationException::database_failure();
+				}
+				if ( false === $wpdb->query( "DELETE FROM {$daily}" ) ) { // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					throw YSSsAnalyticsMutationException::database_failure();
+				}
+			} );
+		} );
 	}
 
 	/**
@@ -263,89 +297,118 @@ final class YSSsQueryRepository {
 	 * 單筆刪除：移除某關鍵字（正規化後）在原始表與彙總表的全部紀錄。
 	 * 分析報表以「詞」為單位，故單筆刪除 = 刪除該詞的所有紀錄。
 	 *
-	 * @return array{queries:int,daily:int} 各表刪除筆數。
+	 * @return array{queries:int,daily:int,total:int} 各表與合計刪除筆數。
 	 */
 	public static function delete_term( string $term ): array {
 		global $wpdb;
 		$norm = self::normalize( $term );
 		if ( '' === $norm ) {
-			return [ 'queries' => 0, 'daily' => 0 ];
+			return [ 'queries' => 0, 'daily' => 0, 'total' => 0 ];
 		}
 		$queries = YSSsSchema::queries_table();
 		$daily   = YSSsSchema::terms_daily_table();
 
-		$dq = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$queries} WHERE query_norm = %s", $norm ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$dd = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE term = %s", $norm ) );          // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return self::with_maintenance_lock( static function () use ( $wpdb, $queries, $daily, $norm ): array {
+			self::assert_transactional_tables( $queries, $daily );
 
-		return [ 'queries' => $dq, 'daily' => $dd ];
+			return self::with_transaction( static function () use ( $wpdb, $queries, $daily, $norm ): array {
+				$dq = $wpdb->query( $wpdb->prepare( "DELETE FROM {$queries} WHERE query_norm = %s", $norm ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				if ( false === $dq ) {
+					throw YSSsAnalyticsMutationException::database_failure();
+				}
+
+				$dd = $wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE term = %s", $norm ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				if ( false === $dd ) {
+					throw YSSsAnalyticsMutationException::database_failure();
+				}
+
+				return [
+					'queries' => (int) $dq,
+					'daily'   => (int) $dd,
+					'total'   => (int) $dq + (int) $dd,
+				];
+			} );
+		} );
 	}
 
 	/**
-	 * 清理注入/攻擊探測紀錄：掃描兩表，凡辨識為攻擊探測的詞一律刪除。
-	 * 只移除攻擊列，保留正常搜尋（含正常的零結果商機詞）。批次防鎖表。
-	 *
-	 * @return int 刪除的原始紀錄筆數。
+	 * Refuse transaction-dependent mutations unless both analytics tables are InnoDB.
 	 */
-	public static function purge_injection(): int {
+	private static function assert_transactional_tables( string $queries, string $daily ): void {
 		global $wpdb;
-		$queries = YSSsSchema::queries_table();
-		$daily   = YSSsSchema::terms_daily_table();
-
-		// 以 id 分頁掃全表（不靠脆弱的 SQL 前置過濾），PHP 端 is_attack 為唯一判準。
-		// 保留期已上限資料量；本動作由後台手動觸發、頻率低。
-		$deleted = 0;
-
-		$last = 0;
-		for ( $i = 0; $i < 1000; $i++ ) {
-			$rows = $wpdb->get_results( $wpdb->prepare(
-				"SELECT id, query_norm FROM {$queries} WHERE id > %d ORDER BY id ASC LIMIT 2000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$last
-			), ARRAY_A );
-			if ( ! $rows ) {
-				break;
-			}
-			$kill = [];
-			foreach ( $rows as $r ) {
-				$last = (int) $r['id'];
-				if ( YSSsInjectionGuard::is_attack( (string) $r['query_norm'] ) ) {
-					$kill[] = (int) $r['id'];
-				}
-			}
-			if ( $kill ) {
-				$in       = implode( ',', array_map( 'intval', $kill ) );
-				$deleted += (int) $wpdb->query( "DELETE FROM {$queries} WHERE id IN ({$in})" ); // phpcs:ignore WordPress.DB.PreparedSQL
-			}
-			if ( count( $rows ) < 2000 ) {
-				break;
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (%s, %s)',
+			$queries,
+			$daily
+		), ARRAY_A );
+		if ( ! is_array( $rows ) || 2 !== count( $rows ) ) {
+			throw YSSsAnalyticsMutationException::database_failure();
+		}
+		foreach ( $rows as $row ) {
+			$engine = (string) ( $row['ENGINE'] ?? $row['engine'] ?? '' );
+			if ( 'innodb' !== strtolower( $engine ) ) {
+				throw YSSsAnalyticsMutationException::database_failure();
 			}
 		}
+	}
 
-		$dlast = 0;
-		for ( $i = 0; $i < 1000; $i++ ) {
-			$rows = $wpdb->get_results( $wpdb->prepare(
-				"SELECT id, term FROM {$daily} WHERE id > %d ORDER BY id ASC LIMIT 2000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$dlast
-			), ARRAY_A );
-			if ( ! $rows ) {
-				break;
-			}
-			$dkill = [];
-			foreach ( $rows as $r ) {
-				$dlast = (int) $r['id'];
-				if ( YSSsInjectionGuard::is_attack( (string) $r['term'] ) ) {
-					$dkill[] = (int) $r['id'];
-				}
-			}
-			if ( $dkill ) {
-				$in = implode( ',', array_map( 'intval', $dkill ) );
-				$wpdb->query( "DELETE FROM {$daily} WHERE id IN ({$in})" ); // phpcs:ignore WordPress.DB.PreparedSQL
-			}
-			if ( count( $rows ) < 2000 ) {
-				break;
-			}
+	/**
+	 * @template T
+	 * @param callable():T $operation
+	 * @return T
+	 */
+	private static function with_transaction( callable $operation ) {
+		global $wpdb;
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+			throw YSSsAnalyticsMutationException::database_failure();
 		}
 
-		return $deleted;
+		$transaction_open = true;
+		try {
+			$result = $operation();
+			if ( false === $wpdb->query( 'COMMIT' ) ) {
+				throw YSSsAnalyticsMutationException::database_failure();
+			}
+			$transaction_open = false;
+			return $result;
+		} catch ( \Throwable $error ) {
+			if ( $transaction_open ) {
+				$wpdb->query( 'ROLLBACK' );
+			}
+			if ( $error instanceof YSSsAnalyticsMutationException ) {
+				throw $error;
+			}
+			throw YSSsAnalyticsMutationException::database_failure();
+		}
+	}
+
+	/**
+	 * Serialize rollup and exact-term deletion for this site's analytics tables.
+	 *
+	 * @template T
+	 * @param callable():T $operation
+	 * @return T
+	 */
+	private static function with_maintenance_lock( callable $operation ) {
+		global $wpdb;
+		$identity  = ( defined( 'DB_NAME' ) ? (string) DB_NAME : '' ) . '|' . YSSsSchema::queries_table();
+		$lock_name = 'ys_ss_maint_' . substr( hash( 'sha256', $identity ), 0, 52 );
+		$acquired  = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 1)', $lock_name ) );
+		if ( null === $acquired || false === $acquired ) {
+			throw YSSsAnalyticsMutationException::database_failure();
+		}
+		if ( 0 === $acquired || '0' === $acquired ) {
+			throw YSSsAnalyticsMutationException::busy();
+		}
+		if ( 1 !== $acquired && '1' !== $acquired ) {
+			throw YSSsAnalyticsMutationException::database_failure();
+		}
+
+		try {
+			return $operation();
+		} finally {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+		}
 	}
 
 	/**

@@ -18,6 +18,7 @@
 namespace YangSheep\SmartSearch\Api;
 
 use YangSheep\SmartSearch\Database\YSSsKeywordRepository;
+use YangSheep\SmartSearch\Database\YSSsAnalyticsMutationException;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
@@ -93,7 +94,7 @@ final class YSSsAdminController {
 			'callback'            => [ $this, 'delete_term' ],
 			'permission_callback' => [ $this, 'permission_admin' ],
 			'args'                => [
-				'term' => [ 'type' => 'string', 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ],
+				'term' => [ 'type' => 'string', 'required' => true ],
 			],
 		] );
 	}
@@ -237,39 +238,70 @@ final class YSSsAdminController {
 	}
 
 	public function purge( \WP_REST_Request $request ) {
-		$mode = (string) $request->get_param( 'mode' );
-
-		if ( 'all' === $mode ) {
-			if ( 'DELETE' !== strtoupper( (string) $request->get_param( 'confirm' ) ) ) {
-				return new \WP_Error( 'ys_ss_confirm_required', __( '請輸入確認碼 DELETE。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
-			}
-			YSSsQueryRepository::purge_all();
-			YSSsSuggestService::invalidate();
-			return rest_ensure_response( [ 'ok' => true, 'counts' => YSSsQueryRepository::counts() ] );
+		$mode = $request->get_param( 'mode' );
+		if ( ! is_string( $mode ) || ! in_array( $mode, [ 'all', 'expired', 'injection' ], true ) ) {
+			return new \WP_Error( 'ys_ss_bad_purge_mode', __( '無效的清理模式。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
 		}
 
-		// 清理注入/攻擊探測紀錄（只刪攻擊列，保留正常搜尋）。
+		// 歷史 heuristic bulk-delete 已退役；若未來要恢復，必須另做 preview/confirm 工作流。
 		if ( 'injection' === $mode ) {
-			$deleted = YSSsQueryRepository::purge_injection();
+			return new \WP_Error( 'ys_ss_preview_required', __( '自動掃描刪除已停用；請改用逐詞精確刪除。', 'ys-cart-smart-search' ), [ 'status' => 409 ] );
+		}
+
+		try {
+			if ( 'all' === $mode ) {
+				$confirm = $request->get_param( 'confirm' );
+				if ( ! is_string( $confirm ) || 'DELETE' !== strtoupper( $confirm ) ) {
+					return new \WP_Error( 'ys_ss_confirm_required', __( '請輸入確認碼 DELETE。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
+				}
+				YSSsQueryRepository::purge_all();
+				YSSsSuggestService::invalidate();
+				return rest_ensure_response( [ 'ok' => true, 'counts' => YSSsQueryRepository::counts() ] );
+			}
+
+			$settings = YSSsSettings::all();
+			$deleted  = YSSsQueryRepository::purge_older_than( (int) $settings['retention_days'] );
 			YSSsSuggestService::invalidate();
 			return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+		} catch ( YSSsAnalyticsMutationException $error ) {
+			return $this->mutation_error( $error );
 		}
-
-		$settings = YSSsSettings::all();
-		$deleted  = YSSsQueryRepository::purge_older_than( (int) $settings['retention_days'] );
-		return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
 	}
 
 	/**
 	 * 單筆刪除：移除某關鍵字在原始表與彙總表的全部紀錄（分析以「詞」為單位）。
 	 */
 	public function delete_term( \WP_REST_Request $request ) {
-		$term = sanitize_text_field( wp_unslash( (string) $request->get_param( 'term' ) ) );
+		$term = $request->get_param( 'term' );
+		if ( ! is_string( $term ) ) {
+			return new \WP_Error( 'ys_ss_empty_term', __( '請指定要刪除的關鍵字。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
+		}
 		if ( '' === trim( $term ) ) {
 			return new \WP_Error( 'ys_ss_empty_term', __( '請指定要刪除的關鍵字。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
 		}
-		$deleted = YSSsQueryRepository::delete_term( $term );
-		YSSsSuggestService::invalidate();
-		return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+
+		try {
+			$deleted = YSSsQueryRepository::delete_term( $term );
+			YSSsSuggestService::invalidate();
+			return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+		} catch ( YSSsAnalyticsMutationException $error ) {
+			return $this->mutation_error( $error );
+		}
+	}
+
+	private function mutation_error( YSSsAnalyticsMutationException $error ): \WP_Error {
+		if ( YSSsAnalyticsMutationException::REASON_BUSY === $error->reason() ) {
+			return new \WP_Error(
+				'ys_ss_analytics_busy',
+				__( '搜尋分析正在更新，請稍後再試。', 'ys-cart-smart-search' ),
+				[ 'status' => 409 ]
+			);
+		}
+
+		return new \WP_Error(
+			'ys_ss_analytics_mutation_failed',
+			__( '搜尋分析資料操作失敗，請稍後再試。', 'ys-cart-smart-search' ),
+			[ 'status' => 500 ]
+		);
 	}
 }
