@@ -12,8 +12,9 @@
   server-calculated total 與實際搜尋範圍；缺失、竄改、過期或不相符的 receipt 維持相同
   `{ok:true}` 回應但零寫入，不新增 validity oracle。同訪客／同詞的 check-and-insert 以
   advisory lock 串行化，避免併發重播雙寫。
-- 熱門建議在 cached、fresh 與 filter-final 三個出口都重新通過輸入 gate；generation-based
-  cache key 防止失效後的 late writer 覆蓋新世代，`count=0` 不洩漏候選詞。
+- 熱門建議在 cached、fresh 與 filter-final 三個出口都重新通過輸入 gate；每次失效發行不重用的
+  128-bit epoch token，避免併發 invalidation 回退並讓 late writer 的舊 cache key 再次成為 current；
+  `count=0` 不洩漏候選詞。
 - 後台逐詞刪除與「清除全部」共用 per-site maintenance lock；兩張分析表必須同為 InnoDB
   才執行交易，任一 DELETE／COMMIT 失敗即 rollback 並回固定安全錯誤，不外洩 SQL 或
   database detail。逾期清理達有界批次上限時不再假報完成，留待下次續跑。
@@ -31,6 +32,9 @@
 - SQL injection 與輸出 XSS 的正式邊界仍是 prepared SQL、WordPress escaping 與 DOM
   `textContent`。輸入 classifier 是搜尋拒絕執行與分析防污染的 abuse control，不取代這些
   邊界，也不宣稱僅靠 pattern matching 能處理任意攻擊。
+- 中性攔截回應不回顯原 payload、也不回明確的 classifier 錯誤，但可由空 `q`／空 receipt 與
+  合法零結果區分；本版不宣稱 classifier decision 完全不可觀察。B 模式在攔截前可能讀取
+  WordPress 設定或載入頁面資產；「不查商品」精確指不執行商品／分類／文章內容搜尋。
 
 ### Operational Note
 
@@ -42,8 +46,8 @@
 ### Security
 
 - B 模式搜尋結果頁（`/ys-search/`）補上與 `query` 端點一致的防注入攔截：辨識為攻擊探測的
-  `ys_ec_search` 一律**拒絕執行**（不查 DB、不記錄、不回顯原字串），顯示中性「沒有符合的結果」
-  提示，不給攻擊者 oracle。修補 v1.5.0 只護 REST `query` 端點、未護結果頁執行路徑的一致性缺口。
+  `ys_ec_search` 一律**拒絕執行商品／分類／文章內容搜尋**（不記錄、不回顯原字串），顯示中性
+  「沒有符合的結果」提示。修補 v1.5.0 只護 REST `query` 端點、未護結果頁執行路徑的一致性缺口。
 
 ## [1.5.0] - 2026-08-25 — 搜尋注入防護 + 後台紀錄清理
 
@@ -56,8 +60,7 @@
   字元與高訊號 token，不誤殺中文（CJK）／英數／連字號等正常商品詞。
 - 攻擊探測在**唯一寫入瓶頸 `YSSsQueryRepository::log()`** 一律不記錄，故不再污染搜尋分析
   與自動熱門建議。
-- 公開 `query` 端點對攻擊探測**拒絕執行搜尋**、回傳空結果（不報錯、不洩漏偵測，避免給
-  攻擊者 oracle）。
+- 公開 `query` 端點對攻擊探測**拒絕執行搜尋**、回傳不含原字串或明確偵測錯誤的空結果。
 - 自動熱門詞 `auto_terms()` 對既有殘留注入詞加上縱深過濾，確保絕不出現在前台建議。
   （前後台呈現本就以 `textContent`／純 DOM 組裝，注入字串一律 inert；本版再從源頭阻斷。）
 

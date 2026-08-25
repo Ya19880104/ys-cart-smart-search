@@ -120,7 +120,12 @@ ysss_test('successful exact delete returns total and invalidates suggestions onc
     $result = (new YSSsAdminController())->delete_term(new WP_REST_Request(['term' => 'Nova']));
     ysss_assert_true($result instanceof WP_REST_Response);
     ysss_assert_same(3, $result->get_data()['deleted']['total'] ?? null);
-    ysss_assert_same(2, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null, 'Successful delete did not invalidate exactly once');
+    $generationUpdates = array_values(array_filter(
+        YSSsWpFake::$optionUpdates,
+        static fn(array $update): bool => 'ys_ss_suggest_cache_generation' === $update['key']
+    ));
+    ysss_assert_same(1, count($generationUpdates), 'Successful delete did not invalidate exactly once');
+    ysss_assert_true((bool) preg_match('/\A[a-f0-9]{32}\z/D', (string) ($generationUpdates[0]['value'] ?? '')), 'Successful delete did not issue a fresh cache epoch');
 });
 
 ysss_test('full purge failure is sanitized and does not invalidate suggestions', static function (): void {
@@ -149,7 +154,12 @@ ysss_test('successful full purge commits and invalidates suggestions once', stat
     $result = (new YSSsAdminController())->purge(new WP_REST_Request(['mode' => 'all', 'confirm' => 'DELETE']));
     ysss_assert_true($result instanceof WP_REST_Response);
     ysss_assert_same(true, $result->get_data()['ok'] ?? null);
-    ysss_assert_same(2, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null, 'Successful full purge did not invalidate exactly once');
+    $generationUpdates = array_values(array_filter(
+        YSSsWpFake::$optionUpdates,
+        static fn(array $update): bool => 'ys_ss_suggest_cache_generation' === $update['key']
+    ));
+    ysss_assert_same(1, count($generationUpdates), 'Successful full purge did not invalidate exactly once');
+    ysss_assert_true((bool) preg_match('/\A[a-f0-9]{32}\z/D', (string) ($generationUpdates[0]['value'] ?? '')), 'Successful full purge did not issue a fresh cache epoch');
     $sql = implode("\n", $GLOBALS['wpdb']->queries);
     ysss_assert_contains('COMMIT', $sql);
     ysss_assert_false(str_contains($sql, 'TRUNCATE'));

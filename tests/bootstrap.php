@@ -226,6 +226,12 @@ final class YSSsWpFake
     /** @var array<string,mixed> */
     public static array $options = [];
 
+    /** @var list<array{key:string,value:mixed}> */
+    public static array $optionUpdates = [];
+
+    /** @var null|Closure(string,mixed):void */
+    public static ?Closure $updateOptionBeforeWrite = null;
+
     /** @var array<string,list<array{priority:int,callback:callable,accepted:int}>> */
     public static array $filters = [];
 
@@ -238,6 +244,8 @@ final class YSSsWpFake
     public static function reset(): void
     {
         self::$transients = [];
+        self::$optionUpdates = [];
+        self::$updateOptionBeforeWrite = null;
         self::$filters = [];
         self::$shortcodes = [];
         self::$routes = [];
@@ -441,6 +449,10 @@ if (!function_exists('get_option')) {
 if (!function_exists('update_option')) {
     function update_option(string $key, mixed $value, mixed $autoload = null): bool
     {
+        YSSsWpFake::$optionUpdates[] = ['key' => $key, 'value' => $value];
+        if (null !== YSSsWpFake::$updateOptionBeforeWrite) {
+            (YSSsWpFake::$updateOptionBeforeWrite)($key, $value);
+        }
         YSSsWpFake::$options[$key] = $value;
         return true;
     }

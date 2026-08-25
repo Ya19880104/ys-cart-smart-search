@@ -88,17 +88,21 @@ final class YSSsSuggestService {
 
 	public static function invalidate(): void {
 		$current = self::generation();
-		update_option( self::GENERATION_OPTION, $current + 1, false );
+		// 每次發行不可重用的 epoch。數值 read-modify-write 在併發時可能由 3 回退成 2，
+		// 使已失效的 v2 late writer 再次成為 current；隨機 token 不依賴寫入先後順序。
+		update_option( self::GENERATION_OPTION, bin2hex( random_bytes( 16 ) ), false );
 		delete_transient( self::cache_key( $current ) );
 		delete_transient( self::LEGACY_CACHE_KEY );
 	}
 
-	private static function generation(): int {
-		return max( 1, (int) get_option( self::GENERATION_OPTION, 1 ) );
+	private static function generation(): string {
+		$value = get_option( self::GENERATION_OPTION, '1' );
+		$token = is_scalar( $value ) ? (string) $value : '1';
+		return 1 === preg_match( '/\A[a-z0-9_-]{1,64}\z/iD', $token ) ? $token : '1';
 	}
 
-	private static function cache_key( int $generation ): string {
-		return self::CACHE_PREFIX . max( 1, $generation );
+	private static function cache_key( string $generation ): string {
+		return self::CACHE_PREFIX . $generation;
 	}
 
 	/**

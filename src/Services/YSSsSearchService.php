@@ -80,11 +80,12 @@ final class YSSsSearchService {
 	 */
 	public static function empty_result(): array {
 		return [
-			'q'           => '',
-			'total'       => 0,
-			'groups'      => [],
-			'view_all'    => '',
-			'log_receipt' => '',
+			'q'             => '',
+			'total'         => 0,
+			'groups'        => [],
+			'content_types' => [],
+			'view_all'      => '',
+			'log_receipt'   => '',
 		];
 	}
 

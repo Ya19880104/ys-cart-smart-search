@@ -117,6 +117,7 @@ ysss_test('neutral result never reflects blocked payload or consults settings', 
         'q' => '',
         'total' => 0,
         'groups' => [],
+        'content_types' => [],
         'view_all' => '',
         'log_receipt' => '',
     ], $result);

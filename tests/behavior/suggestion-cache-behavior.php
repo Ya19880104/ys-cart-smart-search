@@ -91,7 +91,7 @@ ysss_test('public suggest tolerates a non-scalar external source', static functi
 
 ysss_test('in-process invalidation keeps a late writer on its captured generation', static function (): void {
     YSSsWpFake::reset();
-    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 7;
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old7';
     $GLOBALS['wpdb']->columnSets = [[], []];
     $invalidations = 0;
     add_filter('ys_ss_suggestions', static function (array $items) use (&$invalidations): array {
@@ -104,18 +104,47 @@ ysss_test('in-process invalidation keeps a late writer on its captured generatio
 
     $latePayload = YSSsSuggestService::suggestions();
     ysss_assert_same(1, $invalidations, 'The in-process invalidation hook did not execute');
-    ysss_assert_same(8, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null);
-    ysss_assert_same($latePayload, YSSsWpFake::$transients['ys_ss_suggest_cache_v7'] ?? null, 'Late writer did not use the generation captured at request start');
-    ysss_assert_false(isset(YSSsWpFake::$transients['ys_ss_suggest_cache_v8']), 'Late writer polluted the newly current generation');
+    $current = (string) (YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? '');
+    ysss_assert_true((bool) preg_match('/\A[a-f0-9]{32}\z/D', $current), 'Invalidation did not issue a fresh epoch token');
+    ysss_assert_same($latePayload, YSSsWpFake::$transients['ys_ss_suggest_cache_vold7'] ?? null, 'Late writer did not use the generation captured at request start');
+    ysss_assert_false(isset(YSSsWpFake::$transients['ys_ss_suggest_cache_v' . $current]), 'Late writer polluted the newly current generation');
 
-    YSSsWpFake::$transients['ys_ss_suggest_cache_v8'] = [
+    YSSsWpFake::$transients['ys_ss_suggest_cache_v' . $current] = [
         'count' => 1,
         'recent_enabled' => true,
         'items' => [['term' => 'fresh-current', 'source' => 'manual']],
     ];
     $currentPayload = YSSsSuggestService::suggestions();
-    ysss_assert_same([['term' => 'fresh-current', 'source' => 'manual']], $currentPayload['items'] ?? null, 'Current generation reader consumed stale v7 data');
+    ysss_assert_same([['term' => 'fresh-current', 'source' => 'manual']], $currentPayload['items'] ?? null, 'Current generation reader consumed stale old7 data');
     ysss_assert_same(1, $invalidations, 'Current-generation cache hit unexpectedly re-entered the filter');
+});
+
+ysss_test('overlapping invalidations never reuse an already issued generation', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'seed';
+    $writes = [];
+    $nested = false;
+
+    YSSsWpFake::$updateOptionBeforeWrite = static function (string $key, mixed $value) use (&$writes, &$nested): void {
+        if ('ys_ss_suggest_cache_generation' !== $key) {
+            return;
+        }
+        $writes[] = (string) $value;
+        if ($nested) {
+            return;
+        }
+
+        $nested = true;
+        YSSsSuggestService::invalidate();
+        YSSsSuggestService::invalidate();
+    };
+
+    YSSsSuggestService::invalidate();
+    YSSsWpFake::$updateOptionBeforeWrite = null;
+
+    ysss_assert_same(3, count($writes), 'The overlap fixture did not execute all three invalidations');
+    ysss_assert_same(3, count(array_unique($writes)), 'An overlapping invalidation reused an issued generation');
+    ysss_assert_same($writes[0], (string) (YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? ''), 'The overlap fixture did not resume the delayed outer writer last');
 });
 
 ysss_test('auto terms overfetch before filtering and then backfill accepted rows', static function (): void {
