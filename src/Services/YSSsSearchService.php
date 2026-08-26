@@ -110,24 +110,35 @@ final class YSSsSearchService {
 	public static function search_page( string $q, int $page = 1 ): array {
 		$settings = YSSsSettings::all();
 		$norm     = YSSsQueryRepository::normalize( $q );
-		$page     = min( max( 1, $page ), 100 ); // 上限防護：避免病態深分頁產生巨大 OFFSET。
+		$requested_page = min( max( 1, $page ), 100 ); // 上限防護：避免病態深分頁產生巨大 OFFSET。
 		$per_page = max( 6, (int) ( $settings['products']['page_limit'] ?? 24 ) );
 
-		// 短 TTL 快取：避免大型商品表每次結果頁／翻頁都重跑 LIKE 全表掃描 + COUNT
-		//（中文熱門詞命中率高）。鍵含 norm／頁碼／影響結果的設定；60 秒內視為新鮮。
-		// 分析記錄（log_page）在 YSSsResultsPage 另行呼叫、不受此快取影響。
-		$cache_key = 'ys_ss_sp_' . md5( $norm . '|' . $page . '|' . (string) wp_json_encode( [
-			$settings['group_order'], $settings['products'], $settings['categories'], $settings['posts'],
-		] ) );
+		// 只有「自證為該 requested page 的 canonical payload」才可在 COUNT 前快取命中。
+		// 版本納入 key，避免 v1.5.2 依未解析深頁建立的 payload 延續控制新分頁。
+		if ( '' !== $norm ) {
+			$requested_key = self::search_page_cache_key( $norm, $requested_page, $settings );
+			$cached        = get_transient( $requested_key );
+			if ( self::is_canonical_page_cache( $cached, $norm, $requested_page, $per_page ) ) {
+				return $cached;
+			}
+		}
+
+		$meta = '' === $norm
+			? [ 'total_count' => 0, 'page' => 1, 'total_pages' => 1 ]
+			: self::products_page_meta( $norm, $settings['products'], $per_page, $requested_page );
+		$page = $meta['page'];
+
+		// 非 canonical request（如 99→2）先 COUNT 才能取得 page 2 權威，接著只查 page 2 key。
+		// canonical key 若在 COUNT 期間由別一請求完成，也可直接重用。
+		$cache_key = '' !== $norm ? self::search_page_cache_key( $norm, $page, $settings ) : '';
 		if ( '' !== $norm ) {
 			$cached = get_transient( $cache_key );
-			if ( is_array( $cached ) ) {
+			if ( self::is_canonical_page_cache( $cached, $norm, $page, $per_page ) ) {
 				return $cached;
 			}
 		}
 
 		$groups         = [];
-		$products_total = 0;
 		$content_types  = [];
 
 		if ( '' !== $norm ) {
@@ -136,9 +147,13 @@ final class YSSsSearchService {
 
 				if ( 'products' === $type ) {
 					$content_types[] = 'products';
-					$paged           = self::products_group_paged( $norm, $settings['products'], $per_page, ( $page - 1 ) * $per_page );
-					$products_total  = (int) $paged['total_count'];
-					$group           = $paged['group'];
+					$group           = self::products_group_at_page(
+						$norm,
+						$settings['products'],
+						$per_page,
+						$page,
+						$meta['total_count']
+					);
 				} elseif ( 'categories' === $type && ! empty( $settings['categories']['enabled'] ) ) {
 					$content_types[] = 'categories';
 					if ( 1 === $page ) {
@@ -163,10 +178,10 @@ final class YSSsSearchService {
 
 		$result = [
 			'q'              => $norm,
-			'products_total' => $products_total,
+			'products_total' => $meta['total_count'],
 			'page'           => $page,
 			'per_page'       => $per_page,
-			'total_pages'    => max( 1, (int) ceil( $products_total / $per_page ) ),
+			'total_pages'    => $meta['total_pages'],
 			'groups'         => $groups,
 			'content_types'  => $content_types,
 		];
@@ -175,6 +190,80 @@ final class YSSsSearchService {
 			set_transient( $cache_key, $result, MINUTE_IN_SECONDS );
 		}
 		return $result;
+	}
+
+	/**
+	 * @param array<string,mixed> $settings
+	 */
+	private static function search_page_cache_key( string $norm, int $page, array $settings ): string {
+		return 'ys_ss_sp_' . md5( YS_SMART_SEARCH_VERSION . '|' . $norm . '|' . $page . '|' . (string) wp_json_encode( [
+			$settings['group_order'], $settings['products'], $settings['categories'], $settings['posts'],
+		] ) );
+	}
+
+	/**
+	 * 快取本身必須證明其頁碼、總數與目前 per-page 自洽；單純 `is_array()` 不構成頁權威。
+	 */
+	private static function is_canonical_page_cache( mixed $cached, string $norm, int $page, int $per_page ): bool {
+		$required = [ 'q', 'products_total', 'page', 'per_page', 'total_pages', 'groups', 'content_types' ];
+		if ( ! is_array( $cached ) || array_diff( $required, array_keys( $cached ) ) ) {
+			return false;
+		}
+		if ( ! is_string( $cached['q'] ) || $norm !== $cached['q']
+			|| ! is_int( $cached['products_total'] ) || $cached['products_total'] < 0
+			|| ! is_int( $cached['page'] ) || $page !== $cached['page']
+			|| $cached['page'] < 1 || $cached['page'] > 100
+			|| ! is_int( $cached['per_page'] ) || $per_page !== $cached['per_page']
+			|| ! is_int( $cached['total_pages'] )
+			|| ! is_array( $cached['groups'] ) || ! is_array( $cached['content_types'] ) ) {
+			return false;
+		}
+
+		$expected_pages = min( 100, max( 1, (int) ceil( $cached['products_total'] / $per_page ) ) );
+		if ( $expected_pages !== $cached['total_pages'] || $cached['page'] > $cached['total_pages'] ) {
+			return false;
+		}
+		foreach ( $cached['groups'] as $group ) {
+			if ( ! is_array( $group ) || ! is_string( $group['type'] ?? null )
+				|| ! is_string( $group['label'] ?? null ) || ! is_int( $group['total'] ?? null )
+				|| ! is_array( $group['items'] ?? null ) ) {
+				return false;
+			}
+			foreach ( $group['items'] as $item ) {
+				if ( ! is_array( $item ) ) {
+					return false;
+				}
+			}
+		}
+		foreach ( $cached['content_types'] as $type ) {
+			if ( ! is_string( $type ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * @param array<string,mixed> $cfg
+	 * @return array{total_count:int,page:int,total_pages:int}
+	 */
+	private static function products_page_meta( string $q, array $cfg, int $per_page, int $requested_page ): array {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'ys_ec_products';
+		[ $where, $where_args ] = self::build_products_where( $q, $cfg );
+		$total_count = max( 0, (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$table} WHERE status = 'publish' AND {$where}", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$where_args
+		) ) );
+		$total_pages = min( 100, max( 1, (int) ceil( $total_count / max( 1, $per_page ) ) ) );
+		$page        = min( max( 1, $requested_page ), $total_pages );
+
+		return [
+			'total_count' => $total_count,
+			'page'        => $page,
+			'total_pages' => $total_pages,
+		];
 	}
 
 	/**
@@ -337,21 +426,27 @@ final class YSSsSearchService {
 	}
 
 	/**
-	 * 結果頁（B 模式）：商品分頁查詢，回傳精確總數（COUNT）＋當頁項目。
+	 * 結果頁（B 模式）：COUNT 已完成後，只查 canonical page 的商品列。
 	 *
 	 * @param array<string,mixed> $cfg
-	 * @return array{group:array<string,mixed>,total_count:int}
+	 * @return array<string,mixed>
 	 */
-	private static function products_group_paged( string $q, array $cfg, int $per_page, int $offset ): array {
+	private static function products_group_at_page( string $q, array $cfg, int $per_page, int $page, int $total_count ): array {
 		global $wpdb;
+
+		$group = [
+			'type'  => 'products',
+			'label' => __( '商品', 'ys-cart-smart-search' ),
+			'total' => max( 0, $total_count ),
+			'items' => [],
+		];
+		if ( $total_count <= 0 ) {
+			return $group;
+		}
 
 		$table = $wpdb->prefix . 'ys_ec_products';
 		[ $where, $where_args, $order, $order_args ] = self::build_products_where( $q, $cfg );
-
-		$total_count = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$table} WHERE status = 'publish' AND {$where}", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$where_args
-		) );
+		$offset = ( max( 1, $page ) - 1 ) * max( 1, $per_page );
 
 		$sql  = "SELECT id, title, slug, sku, price, sale_price, image_url
 				FROM {$table}
@@ -361,15 +456,8 @@ final class YSSsSearchService {
 		$args = array_merge( $where_args, $order_args, [ max( 1, $per_page ), max( 0, $offset ) ] );
 		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $args ), ARRAY_A ) ?: []; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
-		return [
-			'group'       => [
-				'type'  => 'products',
-				'label' => __( '商品', 'ys-cart-smart-search' ),
-				'total' => $total_count,
-				'items' => self::map_product_rows( $rows, $cfg ),
-			],
-			'total_count' => $total_count,
-		];
+		$group['items'] = self::map_product_rows( $rows, $cfg );
+		return $group;
 	}
 
 	/**

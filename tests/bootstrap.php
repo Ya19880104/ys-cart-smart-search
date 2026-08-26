@@ -275,6 +275,12 @@ final class YSSsFakeWpdb
 
 final class YSSsWpFake
 {
+    /** @var list<array<string,mixed>> */
+    public static array $wpQueryArgs = [];
+
+    /** @var list<mixed> */
+    public static array $wpQueryPosts = [];
+
     /** @var array<string,mixed> */
     public static array $transients = [];
 
@@ -349,6 +355,8 @@ final class YSSsWpFake
 
     public static function reset(): void
     {
+        self::$wpQueryArgs = [];
+        self::$wpQueryPosts = [];
         self::$transients = [];
         self::$optionUpdates = [];
         self::$optionGets = [];
@@ -511,6 +519,8 @@ if (!class_exists('WP_Query')) {
 
         public function __construct(array $args = [])
         {
+            YSSsWpFake::$wpQueryArgs[] = $args;
+            $this->posts = YSSsWpFake::$wpQueryPosts;
         }
     }
 }

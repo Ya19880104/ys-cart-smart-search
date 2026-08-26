@@ -134,7 +134,20 @@ final class YSSsResultsPage {
 
 		$input = YSSsSearchInput::inspect( wp_unslash( $_GET['ys_ec_search'] ?? '' ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$query = $input['query'];
-		$page = isset( $_GET['ys_ss_page'] ) ? max( 1, (int) $_GET['ys_ss_page'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		// 分頁呈現與分析授權刻意分離：service 可把任意整數解析到可見頁，但只有原始
+		// canonical literal `1`（或參數缺席／非 scalar 的安全預設）能建立 page-1 event。
+		$page               = 1;
+		$analytics_page_one = true;
+		if ( array_key_exists( 'ys_ss_page', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$raw_page = $_GET['ys_ss_page']; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			if ( is_scalar( $raw_page ) ) {
+				$raw_page           = wp_unslash( $raw_page );
+				$page               = (int) $raw_page;
+				$analytics_page_one = ( is_string( $raw_page ) && '1' === $raw_page )
+					|| ( is_int( $raw_page ) && 1 === $raw_page );
+			}
+		}
 
 		ob_start();
 		echo '<div class="ys-ss-results">';
@@ -153,13 +166,8 @@ final class YSSsResultsPage {
 		$res = YSSsSearchService::search_page( $query, $page );
 
 		// 分析記錄（去重）：僅第一頁；有/無結果都記（零結果＝商機）。
-		if ( 1 === $page ) {
+		if ( $analytics_page_one ) {
 			$total_for_log = (int) $res['products_total'];
-			foreach ( $res['groups'] as $g ) {
-				if ( 'products' !== $g['type'] ) {
-					$total_for_log += count( $g['items'] );
-				}
-			}
 			try {
 				YSSsQueryRepository::log_page( $query, $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
 			} catch ( \Throwable $e ) {
