@@ -65,6 +65,11 @@ runTests([
 			['nonnumeric', 'many', false],
 			['infinite', Infinity, false],
 			['not-a-number', NaN, false],
+			['boolean-true', true, false],
+			['array-one', [1], false],
+			['numeric-string', '1', false],
+			['object', {}, false],
+			['fractional', 1.5, false],
 		];
 		for (const [label, productsTotal, omit] of cases) {
 			const h = createHarness();
@@ -80,7 +85,7 @@ runTests([
 			if (!omit) { response.products_total = productsTotal; }
 			await h.resolveJson(0, response);
 			h.dispatch(form, 'submit');
-			assert(null === h.sandbox.localStorage.getItem('ysss_recent'), label + ' products_total fell back to aggregate total');
+			assert(null === h.sandbox.localStorage.getItem('ysss_recent'), label + ' products_total authorized recent history');
 			assert(1 === h.beacons.length && 'receipt-' + label === (h.beaconPayload(0) || {}).receipt, label + ' products_total blocked valid analytics');
 		}
 	}],

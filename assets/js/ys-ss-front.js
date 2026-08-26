@@ -325,8 +325,13 @@
 				state = controller(form);
 				if (state.activeRequest === requestController) { state.activeRequest = null; }
 				if (data && data.q && data.log_receipt) {
-					var productsTotal = Number(data.products_total);
-					if (!Number.isFinite(productsTotal) || productsTotal < 0) { productsTotal = 0; }
+					var productsTotal = data.products_total;
+					if (typeof productsTotal !== 'number'
+						|| !Number.isFinite(productsTotal)
+						|| !Number.isInteger(productsTotal)
+						|| productsTotal < 0) {
+						productsTotal = 0;
+					}
 					state.proof = {
 						input: query,
 						query: data.q,
