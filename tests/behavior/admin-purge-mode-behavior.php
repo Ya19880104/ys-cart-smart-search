@@ -369,8 +369,164 @@ ysss_test('only a published shortcode page satisfies the configured results-page
         \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(750),
         'Active shortcode in normal element text was rejected'
     );
+    $inertContexts = [
+        740 => '<script type="text/template">[ys_ss_search_results]</script>',
+        741 => '<style>[ys_ss_search_results]</style>',
+        742 => '<textarea>[ys_ss_search_results]</textarea>',
+        743 => '<template><div>[ys_ss_search_results]</div></template>',
+        744 => '<noscript>[ys_ss_search_results]</noscript>',
+        745 => '<iframe>[ys_ss_search_results]</iframe>',
+        746 => '<noembed>[ys_ss_search_results]</noembed>',
+        748 => '<title>[ys_ss_search_results]</title>',
+        749 => '<noframes>[ys_ss_search_results]</noframes>',
+        739 => '<xmp>[ys_ss_search_results]</xmp>',
+        738 => '<plaintext>[ys_ss_search_results]</plaintext><div>[ys_ss_search_results]</div>',
+        737 => '<TEMPLATE data-kind="x"><SCRIPT type="text/template">[ys_ss_search_results]</SCRIPT></TEMPLATE>',
+        736 => '<template>[ys_ss_search_results]</script><main>[ys_ss_search_results]</main>',
+        735 => '<script/>[ys_ss_search_results]',
+    ];
+    foreach ($inertContexts as $pid => $content) {
+        YSSsWpFake::$posts[$pid] = new WP_Post($pid, 'page', 'publish', $content);
+        ysss_assert_false(
+            \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id($pid),
+            "Shortcode inside raw/inert HTML context {$pid} was accepted as usable results UI"
+        );
+    }
+    YSSsWpFake::$posts[747] = new WP_Post(
+        747,
+        'page',
+        'publish',
+        '<template>[ys_ss_search_results]</template><main>[ys_ss_search_results]</main>'
+    );
+    ysss_assert_true(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(747),
+        'An inert decoy hid a separate active shortcode in normal flow content'
+    );
+    YSSsWpFake::$posts[734] = new WP_Post(734, 'page', 'publish', '<scripture>[ys_ss_search_results]</scripture>');
+    ysss_assert_true(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(734),
+        'A tag-name prefix was mistaken for the blocked script context'
+    );
     YSSsWpFake::$posts[769] = new WP_Post(769, 'page', 'publish', '[ys_ss_search_results]');
     ysss_assert_true(\YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(769));
+});
+
+ysss_test('quoted greater-than attributes never become result-page flow text', static function (): void {
+    YSSsWpFake::reset();
+    $cases = [
+        4100 => "<div data-x='> [ys_ss_search_results]'>nothing</div>",
+        4101 => '<div data-x="> [ys_ss_search_results]">nothing</div>',
+        4102 => "<div data-x='> [ys_ss_search_results]",
+    ];
+    foreach ($cases as $pid => $content) {
+        YSSsWpFake::$posts[$pid] = new WP_Post($pid, 'page', 'publish', $content);
+        ysss_assert_false(
+            \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id($pid),
+            "Quoted or unclosed attribute {$pid} authorized an unusable results page"
+        );
+    }
+});
+
+ysss_test('native inert and incompatible HTML containers cannot authorize full results UI', static function (): void {
+    YSSsWpFake::reset();
+    $tags = [
+        'select', 'option', 'optgroup', 'datalist', 'canvas', 'audio', 'video',
+        'object', 'svg', 'math', 'picture', 'dialog', 'head',
+    ];
+    foreach ($tags as $index => $tag) {
+        $pid = 4120 + $index;
+        YSSsWpFake::$posts[$pid] = new WP_Post(
+            $pid,
+            'page',
+            'publish',
+            "<{$tag} data-kind=\"fixture\">[ys_ss_search_results]</{$tag}>"
+        );
+        ysss_assert_false(
+            \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id($pid),
+            "Shortcode inside {$tag} was accepted as full results UI"
+        );
+    }
+});
+
+ysss_test('raw-text tag-like strings do not poison a later normal-flow shortcode', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$posts[4150] = new WP_Post(
+        4150,
+        'page',
+        'publish',
+        '<script>const tpl = "<template data-x=\'y\'>";</script><main>[ys_ss_search_results]</main>'
+    );
+
+    ysss_assert_true(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(4150),
+        'A tag-like JavaScript string poisoned the raw-text stack after script close'
+    );
+});
+
+ysss_test('invalid tag-name suffixes never close raw or inert result-page contexts', static function (): void {
+    YSSsWpFake::reset();
+    $suffixes = [
+        'bang' => '!',
+        'dot' => '.x',
+        'question' => '?',
+        'equals' => '=x',
+        'at' => '@x',
+        'hash' => '#x',
+        'dollar' => '$x',
+        'percent' => '%x',
+        'ampersand' => '&x',
+        'bracket' => '[x]',
+        'nbsp' => "\xC2\xA0",
+    ];
+    $accepted = [];
+    $pid = 4200;
+    foreach (['script', 'template', 'select'] as $tag) {
+        foreach ($suffixes as $label => $suffix) {
+            YSSsWpFake::$posts[$pid] = new WP_Post(
+                $pid,
+                'page',
+                'publish',
+                "<{$tag}>hidden</{$tag}{$suffix}>[ys_ss_search_results]</{$tag}>"
+            );
+            if (\YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id($pid)) {
+                $accepted[] = "{$tag}:{$label}";
+            }
+            ++$pid;
+        }
+    }
+
+    ysss_assert_same(
+        [],
+        $accepted,
+        'A non-HTML tag-name delimiter released a raw or inert context: ' . implode(', ', $accepted)
+    );
+});
+
+ysss_test('invalid raw close keeps page routing on the exact public fallback', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$posts[4250] = new WP_Post(
+        4250,
+        'page',
+        'publish',
+        '<script>hidden</script!>[ys_ss_search_results]</script>'
+    );
+    $settings = YSSsSettings::all();
+    $settings['results_mode'] = 'page';
+    $settings['results_page_id'] = 4250;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $settings;
+
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(4250),
+        'An invalid raw close authorized B-mode page routing'
+    );
+    ysss_assert_same(
+        'https://example.test/shop/',
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::page_url()
+    );
+    ysss_assert_same(
+        'https://example.test/shop/?ys_ec_search=nova',
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::search_url('nova')
+    );
 });
 
 ysss_test('unchanged page-mode save self-heals an invalid configured page during final settlement', static function (): void {

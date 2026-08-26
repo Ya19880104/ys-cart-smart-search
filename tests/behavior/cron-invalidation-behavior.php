@@ -98,4 +98,45 @@ namespace {
             ysss_assert_false(str_contains(implode('\n', YSSsWpFake::$errorLogs), 'SECRET'));
         }
     });
+
+    ysss_test('rate cleanup failure runs after existing daily work and logs no database detail', static function (): void {
+        YSSsWpFake::reset();
+        $GLOBALS['wpdb']->rateQueryHandler = static function (string $sql): int|false {
+            if (str_starts_with(trim($sql), 'DELETE FROM `wp_options`')) {
+                throw new RuntimeException('SECRET expired rate rows');
+            }
+            return 1;
+        };
+        $builds = 0;
+        add_filter('ys_ss_suggestions', static function (array $items) use (&$builds): array {
+            ++$builds;
+            return [];
+        });
+
+        YSSsCronBridge::run_daily();
+
+        ysss_assert_same(1, $builds, 'Rate cleanup ran before and suppressed existing daily work');
+        ysss_assert_same(['[ys-cart-smart-search] daily rate cleanup error.'], YSSsWpFake::$errorLogs);
+        ysss_assert_false(str_contains(implode('\n', YSSsWpFake::$errorLogs), 'SECRET'));
+    });
+
+    ysss_test('existing daily failure still attempts independent rate cleanup', static function (): void {
+        YSSsWpFake::reset();
+        $cleanupCalls = 0;
+        $GLOBALS['wpdb']->queryHandler = static function (string $sql): int|false {
+            if (str_starts_with($sql, 'INSERT INTO wp_ys_ss_terms_daily')) {
+                throw new RuntimeException('fixture rollup failure');
+            }
+            return 1;
+        };
+        $GLOBALS['wpdb']->rateQueryHandler = static function (string $sql) use (&$cleanupCalls): int {
+            ++$cleanupCalls;
+            return 0;
+        };
+
+        YSSsCronBridge::run_daily();
+
+        ysss_assert_same(1, $cleanupCalls, 'Prior daily failure suppressed independent rate cleanup');
+        ysss_assert_same(['[ys-cart-smart-search] daily cron error.'], YSSsWpFake::$errorLogs);
+    });
 }

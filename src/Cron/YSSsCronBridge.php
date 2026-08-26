@@ -12,6 +12,7 @@ namespace YangSheep\SmartSearch\Cron;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
 defined( 'ABSPATH' ) || exit;
@@ -43,6 +44,16 @@ final class YSSsCronBridge {
 		} catch ( \Throwable $e ) {
 			// 分析旁路：cron 例外不向外拋（不影響核心每日批次的其他訂閱者）。
 			error_log( '[ys-cart-smart-search] daily cron error.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+		}
+
+		// 限流列維護放在原有 daily work 之後且獨立 fail-soft；清理不可阻止
+		// rollup、retention 或 suggestions，錯誤也不外洩 DB detail。
+		try {
+			if ( ! YSSsRateLimiter::cleanup_expired() ) {
+				throw new \RuntimeException( 'rate cleanup unavailable' );
+			}
+		} catch ( \Throwable $e ) {
+			error_log( '[ys-cart-smart-search] daily rate cleanup error.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 		}
 	}
 }

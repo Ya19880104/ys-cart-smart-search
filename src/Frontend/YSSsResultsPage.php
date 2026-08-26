@@ -60,38 +60,194 @@ final class YSSsResultsPage {
 	}
 
 	/**
-	 * 使用 WordPress 自己的 HTML token 與 shortcode grammar，只接受內容文字區實際會執行的
-	 * shortcode；HTML attribute、comment、CDATA 與 [[escaped]] 形式不構成可用結果頁。
+	 * 使用 quote-aware HTML context scanner 與 WordPress shortcode grammar，只接受正常 HTML
+	 * flow 文字區實際會執行的 shortcode；attribute、comment、CDATA、raw/inert context 與
+	 * [[escaped]] 形式不構成可用結果頁。這個 gate 不宣稱證明 CSS visibility 或任意管理員 JS。
 	 */
 	private static function has_executable_shortcode( string $content ): bool {
 		if ( false === strpos( $content, '[' )
-			|| ! function_exists( 'wp_html_split' )
 			|| ! function_exists( 'get_shortcode_regex' ) ) {
 			return false;
 		}
 
 		$pattern = '~' . get_shortcode_regex( [ self::SHORTCODE ] ) . '~s';
-		foreach ( wp_html_split( $content ) as $segment ) {
-			if ( ! is_string( $segment ) || '' === $segment || '<' === $segment[0] ) {
+		$blocked = array_fill_keys( [
+			'script',
+			'style',
+			'textarea',
+			'title',
+			'template',
+			'noscript',
+			'iframe',
+			'noembed',
+			'noframes',
+			'xmp',
+			'plaintext',
+			'select',
+			'option',
+			'optgroup',
+			'datalist',
+			'canvas',
+			'audio',
+			'video',
+			'object',
+			'svg',
+			'math',
+			'picture',
+			'dialog',
+			'head',
+		], true );
+		$raw = array_fill_keys( [
+			'script', 'style', 'textarea', 'title', 'noscript', 'iframe',
+			'noembed', 'noframes', 'xmp',
+		], true );
+		$stack  = [];
+		$offset = 0;
+		$length = strlen( $content );
+		while ( $offset < $length ) {
+			if ( [] !== $stack ) {
+				$top = (string) end( $stack );
+				if ( 'plaintext' === $top ) {
+					return false; // HTML plaintext never returns to normal parsing mode.
+				}
+				if ( isset( $raw[ $top ] ) ) {
+					$raw_end = self::raw_context_end( $content, $offset, $top );
+					if ( null === $raw_end ) {
+						return false;
+					}
+					array_pop( $stack );
+					$offset = $raw_end;
+					continue;
+				}
+			}
+
+			$tag_start = strpos( $content, '<', $offset );
+			$text_end  = false === $tag_start ? $length : $tag_start;
+			if ( [] === $stack && $text_end > $offset
+				&& self::text_has_shortcode( substr( $content, $offset, $text_end - $offset ), $pattern ) ) {
+				return true;
+			}
+			if ( false === $tag_start ) {
+				break;
+			}
+
+			$token = self::html_token_at( $content, $tag_start );
+			if ( null === $token ) {
+				return false; // An unterminated quote/tag cannot authorize later bytes.
+			}
+			$offset = $token['end'];
+			$tag    = $token['tag'];
+			if ( null === $tag || ! isset( $blocked[ $tag['name'] ] ) ) {
 				continue;
 			}
 
-			$matches = [];
-			$result  = preg_match_all( $pattern, $segment, $matches, PREG_SET_ORDER );
-			if ( false === $result || 0 === $result ) {
+			if ( $tag['closing'] ) {
+				if ( [] !== $stack && $tag['name'] === end( $stack ) ) {
+					array_pop( $stack );
+				}
 				continue;
 			}
-			foreach ( $matches as $match ) {
-				if ( self::SHORTCODE !== ( $match[2] ?? '' ) ) {
-					continue;
-				}
-				if ( '[' === ( $match[1] ?? '' ) && ']' === ( $match[6] ?? '' ) ) {
-					continue;
-				}
-				return true;
-			}
+
+			// Blocked elements are never treated as void: `<script/>` still opens raw context.
+			$stack[] = $tag['name'];
 		}
 		return false;
+	}
+
+	private static function text_has_shortcode( string $text, string $pattern ): bool {
+		$matches = [];
+		$result  = preg_match_all( $pattern, $text, $matches, PREG_SET_ORDER );
+		if ( false === $result || 0 === $result ) {
+			return false;
+		}
+		foreach ( $matches as $match ) {
+			if ( self::SHORTCODE !== ( $match[2] ?? '' ) ) {
+				continue;
+			}
+			if ( '[' === ( $match[1] ?? '' ) && ']' === ( $match[6] ?? '' ) ) {
+				continue;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Quote-aware token consumption. Comments and CDATA are returned without a tag.
+	 *
+	 * @return array{end:int,tag:array{name:string,closing:bool}|null}|null
+	 */
+	private static function html_token_at( string $html, int $start ): ?array {
+		$length = strlen( $html );
+		if ( $start < 0 || $start >= $length || '<' !== $html[ $start ] ) {
+			return null;
+		}
+		if ( 0 === substr_compare( $html, '<!--', $start, 4 ) ) {
+			$end = strpos( $html, '-->', $start + 4 );
+			return [ 'end' => false === $end ? $length : $end + 3, 'tag' => null ];
+		}
+		if ( 0 === substr_compare( $html, '<![CDATA[', $start, 9 ) ) {
+			$end = strpos( $html, ']]>', $start + 9 );
+			return [ 'end' => false === $end ? $length : $end + 3, 'tag' => null ];
+		}
+
+		$next = $html[ $start + 1 ] ?? '';
+		if ( '' === $next || 1 !== preg_match( '/[A-Za-z!\/?]/D', $next ) ) {
+			return [ 'end' => $start + 1, 'tag' => null ]; // Literal less-than text.
+		}
+
+		$quote = '';
+		for ( $i = $start + 1; $i < $length; ++$i ) {
+			$byte = $html[ $i ];
+			if ( '' !== $quote ) {
+				if ( $byte === $quote ) {
+					$quote = '';
+				}
+				continue;
+			}
+			if ( '"' === $byte || "'" === $byte ) {
+				$quote = $byte;
+				continue;
+			}
+			if ( '>' === $byte ) {
+				$token = substr( $html, $start, $i - $start + 1 );
+				return [ 'end' => $i + 1, 'tag' => self::html_context_tag( $token ) ];
+			}
+		}
+		return null;
+	}
+
+	private static function raw_context_end( string $html, int $offset, string $name ): ?int {
+		$needle = '</' . $name;
+		$search = $offset;
+		while ( false !== ( $candidate = stripos( $html, $needle, $search ) ) ) {
+			$token = self::html_token_at( $html, $candidate );
+			if ( null === $token ) {
+				return null;
+			}
+			$tag = $token['tag'];
+			if ( null !== $tag && $tag['closing'] && $name === $tag['name'] ) {
+				return $token['end'];
+			}
+			$search = $candidate + 2;
+		}
+		return null;
+	}
+
+	/**
+	 * @return array{name:string,closing:bool}|null
+	 */
+	private static function html_context_tag( string $token ): ?array {
+		$match = [];
+		// HTML tag names end only before ASCII whitespace, `/` or `>`; `\b` would
+		// incorrectly accept tokens such as `</script!>` and release a raw context.
+		if ( 1 !== preg_match( '/\A<(\/?)([a-z][a-z0-9:-]*)(?=[\x09\x0A\x0C\x0D\x20\/>])/isD', $token, $match ) ) {
+			return null;
+		}
+		return [
+			'name'    => strtolower( $match[2] ),
+			'closing' => '/' === $match[1],
+		];
 	}
 
 	/**

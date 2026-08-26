@@ -13,13 +13,17 @@
   無效輸入與後台競態均回固定且如實的狀態，刪除、排序、啟停與設定操作不再假報成功。
 - B 模式先取得商品總數再解析最後可見頁，分類／文章與商品共用 canonical page；快取鍵加入版本
   並只寫 resolved page，避免深分頁空結果、過大 OFFSET 與舊版 cache 污染。結果頁必須公開發布、
-  不設密碼且在內容文字區含實際可執行的 shortcode（HTML attribute／comment／CDATA 與只顯示
-  文字的 escaped 形式都不算）；
+  不設密碼且在正常 HTML flow 文字區含實際可執行的 shortcode；quote-aware scanner 會排除
+  quoted attribute、comment／CDATA、raw-text、template 及 native-inert/content-model context，
+  只顯示文字的 escaped 形式也不算。Raw-text 內的 tag-like 字串不會污染關閉後的正常 flow；
   設定頁會自我修復遺失頁面，頁面 ID 寫入失敗則回滾新頁。頁面分析與 REST 共用每分鐘 30 次
   預算，查看全部由落地頁單點記錄，不重複送出 client log。
-- 公開 query／suggest／log 與 B 頁分析的 transient 計數改在 per-counter MySQL advisory lock 內
-  串行化；鎖忙、可偵測的資料庫／counter 讀寫失敗或鎖釋放失敗皆 fail closed。這關閉平行舊讀超額
-  與 `set_transient()` 失敗仍放行的缺口；B 頁只略過分析，不影響已完成的搜尋結果呈現。
+- 公開 query／suggest／log 與 B 頁分析改用 plugin-owned 非 transient 的持久限流列，並在
+  per-counter MySQL advisory lock 內以直接 DB read、整筆原子 upsert 及 exact readback 決策；
+  transient 提早消失不再重置額度。鎖忙、資料庫／state 讀寫不明或鎖釋放失敗皆 fail closed；
+  B 頁只略過分析，不影響已完成的搜尋結果呈現。Client identity 使用 site-keyed HMAC，IPv6
+  privacy address 依 /64 聚合。每日 cron 以 completion-aware bounded multi-batch current-value
+  DELETE 獨立清理 canonical 過期列；滿額 backlog 不假報完成，也不會用舊名單刪掉剛刷新 counter。
 - 分析的 SKU／ISBN／EAN／UPC／MPN／型號／料號辨識改為 token-local byte span；只豁免完整位於
   識別片段內的 token。搜尋與分析共用有界固定點 canonical closure；無 intl 時涵蓋 fullwidth、
   Mathematical Latin（含 dotless i/j）／digits 與明列 Letterlike ASCII subset，有 intl 時另加 NFKC。閉包未完成即

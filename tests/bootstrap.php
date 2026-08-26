@@ -148,6 +148,15 @@ final class YSSsFakeWpdb
     /** @var null|Closure(string,mixed,self):array */
     public ?Closure $getResultsHandler = null;
 
+    /** @var null|Closure(string,mixed,self):array */
+    public ?Closure $rateGetResultsHandler = null;
+
+    /** @var null|Closure(string,self):int|false */
+    public ?Closure $rateQueryHandler = null;
+
+    /** @var null|Closure(string,self):void */
+    public ?Closure $rateCleanupBeforeApply = null;
+
     /** @var list<array<int,mixed>> */
     public array $resultSets = [];
 
@@ -190,6 +199,19 @@ final class YSSsFakeWpdb
     public function get_results(string $query, mixed $output = null): array
     {
         $this->queries[] = $query;
+        $ratePattern = '/\ASELECT\s+option_name\s*,\s*option_value'
+            . '\s+FROM\s+`?' . preg_quote($this->prefix . 'options', '/') . '`?'
+            . "\s+WHERE\s+option_name\s*=\s*'(ys_ss_rate_v1_[a-z0-9_-]{1,32}_[a-f0-9]{24})'"
+            . '\s+LIMIT\s+2\s*\z/iD';
+        if (1 === preg_match($ratePattern, trim($query), $rateMatch)) {
+            if (null !== $this->rateGetResultsHandler) {
+                return (array) ($this->rateGetResultsHandler)($query, $output, $this);
+            }
+            $name = $rateMatch[1];
+            return array_key_exists($name, YSSsWpFake::$options)
+                ? [['option_name' => $name, 'option_value' => (string) YSSsWpFake::$options[$name]]]
+                : [];
+        }
         if (null !== $this->getResultsHandler) {
             return (array) ($this->getResultsHandler)($query, $output, $this);
         }
@@ -285,6 +307,59 @@ final class YSSsFakeWpdb
     public function query(string $query): int|false
     {
         $this->queries[] = $query;
+        $rateUpsertPattern = '/\AINSERT\s+INTO\s+`?'
+            . preg_quote($this->prefix . 'options', '/') . '`?'
+            . '\s*\(\s*option_name\s*,\s*option_value\s*,\s*autoload\s*\)'
+            . "\s*VALUES\s*\(\s*'(ys_ss_rate_v1_[a-z0-9_-]{1,32}_[a-f0-9]{24})'"
+            . "\s*,\s*'(v1:[0-9]+:[0-9]+)'\s*,\s*'no'\s*\)"
+            . '\s*ON\s+DUPLICATE\s+KEY\s+UPDATE\s+option_value\s*=\s*VALUES\(option_value\)'
+            . '\s*,\s*autoload\s*=\s*VALUES\(autoload\)\s*\z/isD';
+        if (1 === preg_match($rateUpsertPattern, trim($query), $rateMatch)) {
+            if (null !== $this->rateQueryHandler) {
+                return ($this->rateQueryHandler)($query, $this);
+            }
+            YSSsWpFake::$options[$rateMatch[1]] = $rateMatch[2];
+            return 1;
+        }
+        $trimmed = trim($query);
+        $rateCleanupPattern = '/\ADELETE\s+FROM\s+`?'
+            . preg_quote($this->prefix . 'options', '/') . '`?'
+            . '\s+WHERE\s+option_name\s+LIKE\s+'
+            . preg_quote("'ys\\_ss\\_rate\\_v1\\_%'", '/')
+            . '\s+AND\s+option_name\s+REGEXP\s+'
+            . preg_quote("'^ys_ss_rate_v1_[a-z0-9_-]{1,32}_[a-f0-9]{24}$'", '/')
+            . '\s+AND\s+option_value\s+REGEXP\s+'
+            . preg_quote("'^v1:[1-9][0-9]*:[1-9][0-9]*$'", '/')
+            . "\s+AND\s+CAST\(SUBSTRING_INDEX\(SUBSTRING_INDEX\(option_value\s*,\s*':'\s*,\s*2\)"
+            . "\s*,\s*':'\s*,\s*-1\)\s+AS\s+UNSIGNED\)\s*<=\s*([0-9]+)"
+            . '\s+LIMIT\s+5000\s*\z/isD';
+        if (1 === preg_match($rateCleanupPattern, $trimmed, $cleanupMatch)) {
+            // Real wpdb clears a prior query's last_error before executing this new statement.
+            $this->last_error = '';
+            if (null !== $this->rateQueryHandler) {
+                return ($this->rateQueryHandler)($query, $this);
+            }
+            if (null !== $this->rateCleanupBeforeApply) {
+                ($this->rateCleanupBeforeApply)($query, $this);
+            }
+            $now = (int) ($cleanupMatch[1] ?? 0);
+            $deleted = 0;
+            foreach (array_keys(YSSsWpFake::$options) as $name) {
+                $value = YSSsWpFake::$options[$name];
+                if (1 !== preg_match('/\Ays_ss_rate_v1_[a-z0-9_-]{1,32}_[a-f0-9]{24}\z/iD', $name)
+                    || !is_string($value)
+                    || 1 !== preg_match('/\Av1:([1-9][0-9]*):([1-9][0-9]*)\z/D', $value, $state)
+                    || (int) $state[1] > $now) {
+                    continue;
+                }
+                unset(YSSsWpFake::$options[$name]);
+                ++$deleted;
+                if (5000 === $deleted) {
+                    break;
+                }
+            }
+            return $deleted;
+        }
         if (null !== $this->queryHandler) {
             return ($this->queryHandler)($query, $this);
         }

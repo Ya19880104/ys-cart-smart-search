@@ -635,17 +635,28 @@ ysss_test('distinct page-one terms share the thirty-per-minute log budget withou
     }
 
     ysss_assert_same(30, count($GLOBALS['wpdb']->inserts), 'Page-one analytics bypassed or underfilled the shared log budget');
-    $rateWrites = array_values(array_filter(
+    $rateRows = array_filter(
+        YSSsWpFake::$options,
+        static fn(mixed $value, string $key): bool => str_starts_with($key, 'ys_ss_rate_v1_log_'),
+        ARRAY_FILTER_USE_BOTH
+    );
+    ysss_assert_same(1, count($rateRows), 'Page analytics did not share one durable REST log budget row');
+    ysss_assert_true(
+        1 === preg_match('/\Av1:[0-9]+:30\z/D', (string) reset($rateRows)),
+        'Page rendering did not consume exactly the thirty admitted log events'
+    );
+    $transientRateReads = array_filter(
+        YSSsWpFake::$transientGets,
+        static fn(array $read): bool => str_contains((string) ($read['key'] ?? ''), 'ss_rate')
+            || str_contains((string) ($read['key'] ?? ''), 'ss_rl_')
+    );
+    $transientRateWrites = array_filter(
         YSSsWpFake::$transientSets,
-        static fn(array $write): bool => str_starts_with((string) ($write['key'] ?? ''), 'ys_ss_rl_')
-    ));
-    ysss_assert_same(30, count($rateWrites), 'Page rendering did not consume exactly the admitted log events');
-    foreach ($rateWrites as $write) {
-        ysss_assert_true(
-            str_starts_with((string) ($write['key'] ?? ''), 'ys_ss_rl_log_'),
-            'Page analytics used a private rate-limit action instead of the REST log budget'
-        );
-    }
+        static fn(array $write): bool => str_contains((string) ($write['key'] ?? ''), 'ss_rate')
+            || str_contains((string) ($write['key'] ?? ''), 'ss_rl_')
+    );
+    ysss_assert_same([], array_values($transientRateReads), 'Page analytics still read transient rate authority');
+    ysss_assert_same([], array_values($transientRateWrites), 'Page analytics still wrote transient rate authority');
 });
 
 ysss_test('unavailable page rate authority preserves rendering with zero analytics work', static function (): void {
