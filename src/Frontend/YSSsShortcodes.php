@@ -17,6 +17,7 @@ final class YSSsShortcodes {
 
 	private static bool $assets_needed = false;
 	private static bool $popup_printed = false;
+	private static int $panel_sequence = 0;
 
 	public static function register(): void {
 		add_shortcode( 'ys_ss_search', [ self::class, 'render_bar' ] );
@@ -94,6 +95,7 @@ final class YSSsShortcodes {
 				'viewAll'   => __( '查看全部商品結果 →', 'ys-cart-smart-search' ),
 				'noResults' => __( '找不到符合的結果，試試其他關鍵字：', 'ys-cart-smart-search' ),
 				'searching' => __( '搜尋中…', 'ys-cart-smart-search' ),
+				'error'     => __( '搜尋暫時無法使用，請稍後再試。', 'ys-cart-smart-search' ),
 			],
 		] );
 	}
@@ -131,6 +133,7 @@ final class YSSsShortcodes {
 		self::enqueue_assets();
 
 		$atts = shortcode_atts( [ 'placeholder' => __( '搜尋商品…', 'ys-cart-smart-search' ) ], (array) $atts, 'ys_ss_search' );
+		$panel_id = 'ys-ss-panel-' . ++self::$panel_sequence;
 
 		ob_start();
 		?>
@@ -139,11 +142,13 @@ final class YSSsShortcodes {
 			<div class="ys-ss-inputwrap">
 				<input type="search" name="ys_ec_search" class="ys-ss-input"
 					placeholder="<?php echo esc_attr( (string) $atts['placeholder'] ); ?>"
-					autocomplete="off" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>">
+					autocomplete="off" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>"
+					role="combobox" aria-autocomplete="list" aria-expanded="false"
+					aria-controls="<?php echo esc_attr( $panel_id ); ?>">
 				<button type="submit" class="ys-ss-submit" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 				</button>
-				<div class="ys-ss-panel" hidden></div>
+				<div class="ys-ss-panel" id="<?php echo esc_attr( $panel_id ); ?>" role="listbox" aria-live="polite" hidden></div>
 			</div>
 		</form>
 		<?php
@@ -161,7 +166,7 @@ final class YSSsShortcodes {
 		}
 		self::enqueue_assets();
 
-		return '<button type="button" class="ys-ss-icon-trigger" data-ys-ss-open aria-label="' . esc_attr__( '開啟搜尋', 'ys-cart-smart-search' ) . '">'
+		return '<button type="button" class="ys-ss-icon-trigger" data-ys-ss-open aria-haspopup="dialog" aria-label="' . esc_attr__( '開啟搜尋', 'ys-cart-smart-search' ) . '">'
 			. '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>'
 			. '</button>';
 	}
@@ -174,6 +179,7 @@ final class YSSsShortcodes {
 			return;
 		}
 		self::$popup_printed = true;
+		$panel_id = 'ys-ss-panel-' . ++self::$panel_sequence;
 		?>
 		<div class="ys-ss-popup" id="ys-ss-popup" hidden role="dialog" aria-modal="true" aria-label="<?php esc_attr_e( '商品搜尋', 'ys-cart-smart-search' ); ?>">
 			<div class="ys-ss-popup__backdrop" data-ys-ss-close></div>
@@ -184,11 +190,13 @@ final class YSSsShortcodes {
 					<div class="ys-ss-inputwrap">
 						<input type="search" name="ys_ec_search" class="ys-ss-input"
 							placeholder="<?php esc_attr_e( '搜尋商品…', 'ys-cart-smart-search' ); ?>"
-							autocomplete="off" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>">
+							autocomplete="off" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>"
+							role="combobox" aria-autocomplete="list" aria-expanded="false"
+							aria-controls="<?php echo esc_attr( $panel_id ); ?>">
 						<button type="submit" class="ys-ss-submit" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>">
 							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 						</button>
-						<div class="ys-ss-panel" hidden></div>
+						<div class="ys-ss-panel" id="<?php echo esc_attr( $panel_id ); ?>" role="listbox" aria-live="polite" hidden></div>
 					</div>
 				</form>
 			</div>

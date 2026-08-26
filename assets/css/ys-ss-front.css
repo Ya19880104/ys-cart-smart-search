@@ -137,7 +137,8 @@
 }
 
 .ys-ss-chip:hover,
-.ys-ss-chip:focus-visible {
+.ys-ss-chip:focus-visible,
+.ys-ss-chip.is-active {
 	border-color: var(--ys-ec-primary, #8fa8b8);
 	background: #fff;
 }
@@ -171,7 +172,8 @@
 }
 
 .ys-ss-item:hover,
-.ys-ss-item:focus-visible {
+.ys-ss-item:focus-visible,
+.ys-ss-item.is-active {
 	background: var(--ys-ec-bg, #f4f7f9);
 }
 
@@ -239,6 +241,7 @@
 }
 
 .ys-ss-viewall:hover { text-decoration: underline; }
+.ys-ss-viewall.is-active { text-decoration: underline; }
 
 .ys-ss-empty__msg {
 	padding: 8px 4px 10px;
