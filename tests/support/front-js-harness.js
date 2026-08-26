@@ -53,6 +53,10 @@ class NodeStub {
 			get: () => Array.from(this._classes).join(' '),
 			set: (value) => { this._classes = new Set(classTokens(value)); },
 		});
+		Object.defineProperty(this, 'href', {
+			get: () => this.getAttribute('href') || '',
+			set: (value) => { this.setAttribute('href', value); },
+		});
 		Object.defineProperty(this, 'childElementCount', {
 			get: () => this.children.filter((child) => '#TEXT' !== child.tagName).length,
 		});
@@ -135,7 +139,11 @@ class NodeStub {
 		}
 		return false;
 	}
-	focus() { if (this.ownerDocument) { this.ownerDocument.activeElement = this; } }
+	focus() {
+		if (!this.ownerDocument || this.ownerDocument.activeElement === this) { return; }
+		this.ownerDocument.activeElement = this;
+		this.dispatchEvent({ type: 'focus', target: this });
+	}
 	click() {
 		this.clickCount += 1;
 		this.dispatchEvent({ type: 'click', target: this });

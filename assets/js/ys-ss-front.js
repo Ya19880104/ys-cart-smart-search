@@ -117,11 +117,29 @@
 		return state.generation;
 	}
 
-	function isCurrent(form, token, expectedValue) {
+	function isCurrent(form, token, expectedValue, expectedMode) {
 		var input = form.querySelector('.ys-ss-input');
-		return controller(form).generation === token
+		var state = controller(form);
+		return state.generation === token
 			&& !!input
-			&& (input.value || '').trim() === expectedValue;
+			&& (input.value || '').trim() === expectedValue
+			&& (!expectedMode || state.mode === expectedMode);
+	}
+
+	function closeInteraction(form) {
+		beginInteraction(form, 'closed');
+	}
+
+	function renderFailure(form) {
+		var state = controller(form);
+		clearTimeout(state.settleTimer);
+		state.settleTimer = null;
+		state.proof = null;
+		form._ysSsLogProof = null;
+		state.activeRequest = null;
+		state.activeIndex = -1;
+		state.mode = 'error';
+		renderPanelState(form, 'error', null);
 	}
 
 	function selectableItems(panel) {
@@ -259,7 +277,7 @@
 
 	function loadSuggestions() {
 		if (!suggestPromise) {
-			suggestPromise = fetch(CFG.restUrl + '/suggest')
+			var pending = fetch(CFG.restUrl + '/suggest')
 				.then(function (response) {
 					if (!response.ok) { throw new Error('suggest request failed'); }
 					return response.json();
@@ -267,27 +285,30 @@
 				.then(function (data) {
 					suggestCache = data && Array.isArray(data.items) ? data : { items: [] };
 					return suggestCache;
-				})
-				.catch(function () {
-					suggestCache = { items: [] };
-					return suggestCache;
 				});
+			suggestPromise = pending.catch(function (error) {
+				suggestCache = null;
+				suggestPromise = null;
+				throw error;
+			});
 		}
 		return suggestPromise;
 	}
 
 	function requestSuggestions(form, token) {
 		loadSuggestions().then(function (data) {
-			if (!isCurrent(form, token, '')) { return; }
+			if (!isCurrent(form, token, '', 'suggest')) { return; }
 			var state = controller(form);
-			state.mode = 'suggest';
 			renderPanelState(form, 'suggest', { data: data });
+		}).catch(function () {
+			if (!isCurrent(form, token, '', 'suggest')) { return; }
+			renderFailure(form);
 		});
 	}
 
 	function requestQuery(form, query, token) {
 		var state = controller(form);
-		if (!isCurrent(form, token, query)) { return; }
+		if (!isCurrent(form, token, query, 'query')) { return; }
 		var requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
 		state.activeRequest = requestController;
 		state.mode = 'loading';
@@ -300,7 +321,7 @@
 				return response.json();
 			})
 			.then(function (data) {
-				if (!isCurrent(form, token, query)) { return; }
+				if (!isCurrent(form, token, query, 'loading')) { return; }
 				state = controller(form);
 				if (state.activeRequest === requestController) { state.activeRequest = null; }
 				if (data && data.q && data.log_receipt) {
@@ -318,8 +339,11 @@
 					state.mode = 'empty';
 					renderPanelState(form, 'empty', { data: data, suggestions: null });
 					loadSuggestions().then(function (suggestions) {
-						if (!isCurrent(form, token, query) || controller(form).mode !== 'empty') { return; }
+						if (!isCurrent(form, token, query, 'empty')) { return; }
 						renderPanelState(form, 'empty', { data: data, suggestions: suggestions });
+					}).catch(function () {
+						if (!isCurrent(form, token, query, 'empty')) { return; }
+						renderFailure(form);
 					});
 				} else {
 					state.mode = 'results';
@@ -329,23 +353,19 @@
 				clearTimeout(state.settleTimer);
 				if (query.length >= 2 && state.proof) {
 					var proof = state.proof;
+					var settleMode = state.mode;
 					state.settleTimer = setTimeout(function () {
 						state.settleTimer = null;
-						if (isCurrent(form, token, query) && state.proof === proof) {
+						if (isCurrent(form, token, query, settleMode) && state.proof === proof) {
 							logQuery(proof.query, proof.receipt, sourceOf(form));
 						}
 					}, 1200);
 				}
 			})
 			.catch(function (error) {
-				if (error && error.name === 'AbortError' && !isCurrent(form, token, query)) { return; }
-				if (!isCurrent(form, token, query)) { return; }
-				state = controller(form);
-				if (state.activeRequest === requestController) { state.activeRequest = null; }
-				state.proof = null;
-				form._ysSsLogProof = null;
-				state.mode = 'error';
-				renderPanelState(form, 'error', null);
+				if (error && error.name === 'AbortError' && !isCurrent(form, token, query, 'loading')) { return; }
+				if (!isCurrent(form, token, query, 'loading')) { return; }
+				renderFailure(form);
 			});
 	}
 
@@ -363,7 +383,7 @@
 
 		var composing = false;
 		var run = debounce(function (query, token) {
-			if (composing || !isCurrent(form, token, query)) { return; }
+			if (composing || !isCurrent(form, token, query, query ? 'query' : 'suggest')) { return; }
 			if (query) { requestQuery(form, query, token); } else { requestSuggestions(form, token); }
 		}, 250);
 
@@ -400,10 +420,7 @@
 		input.addEventListener('keydown', function (event) {
 			var state = controller(form);
 			if ('Escape' === event.key) {
-				if (state.activeRequest) { state.activeRequest.abort(); state.activeRequest = null; state.generation += 1; }
-				state.mode = 'closed';
-				state.activeIndex = -1;
-				renderPanelState(form, 'closed', null);
+				closeInteraction(form);
 				return;
 			}
 			var items = selectableItems(panel);
@@ -423,10 +440,7 @@
 
 		document.addEventListener('click', function (event) {
 			if (!form.contains(event.target)) {
-				var state = controller(form);
-				state.activeIndex = -1;
-				state.mode = 'closed';
-				renderPanelState(form, 'closed', null);
+				closeInteraction(form);
 			}
 		});
 	}
@@ -453,6 +467,7 @@
 		}
 
 		function closePopup() {
+			Array.prototype.forEach.call(popup.querySelectorAll('form[data-ys-ss]'), closeInteraction);
 			popup.hidden = true;
 			document.documentElement.classList.remove('ys-ss-noscroll');
 			var restore = popupOpener;

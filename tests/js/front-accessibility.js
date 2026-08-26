@@ -21,10 +21,9 @@ runTests([
 		const h = createHarness();
 		const { input, panel } = h.forms[0];
 		input.value = 'nova';
-		h.dispatch(input, 'input');
-		h.advanceTimers(250);
-		await h.resolveJson(0, threeResults());
 		input.focus();
+		assert(1 === h.pendingFetches.length, 'focus() did not start the populated combobox query');
+		await h.resolveJson(0, threeResults());
 		for (let index = 0; index < 3; index += 1) {
 			h.dispatch(input, 'keydown', { key: 'ArrowDown' });
 			assert('ys-ss-panel-fixture-0-option-' + index === input.getAttribute('aria-activedescendant'), 'ArrowDown did not select option ID ' + index);
@@ -40,10 +39,9 @@ runTests([
 		const h = createHarness();
 		const { input, panel } = h.forms[0];
 		input.value = 'nova';
-		h.dispatch(input, 'input');
-		h.advanceTimers(250);
-		await h.resolveJson(0, threeResults());
 		input.focus();
+		assert(1 === h.pendingFetches.length, 'focus() did not start the Escape fixture query');
+		await h.resolveJson(0, threeResults());
 		h.dispatch(input, 'keydown', { key: 'ArrowDown' });
 		assert(null !== input.getAttribute('aria-activedescendant'), 'ArrowDown did not establish an active descendant before Escape');
 		assert('true' === input.getAttribute('aria-expanded'), 'rendered options did not expand the combobox before Escape');
@@ -52,15 +50,30 @@ runTests([
 		assert(panel.hidden, 'Escape did not collapse the result panel');
 		assert('false' === input.getAttribute('aria-expanded'), 'Escape did not set aria-expanded=false');
 	}],
-	['popup traps Tab in both directions and restores the exact second opener', async () => {
+	['focus dispatches the production focus interaction', async () => {
+		const h = createHarness();
+		const { input } = h.forms[0];
+		input.value = 'focus-query';
+		input.focus();
+		assert(1 === h.pendingFetches.length, 'focus() did not dispatch the production focus handler');
+		assert(h.pendingFetches[0].url.endsWith('/query?q=focus-query'), 'focus handler did not issue the literal populated query');
+	}],
+	['popup traps across rendered result links and view-all then restores the exact second opener', async () => {
 		const h = createHarness({ formCount: 0, popup: true, triggerCount: 2 });
 		const secondTrigger = h.triggers[1];
 		secondTrigger.focus();
 		secondTrigger.click();
 		h.advanceTimers(30);
 		assert(h.document.activeElement === h.popup.input, 'popup did not focus its search input');
+		assert(1 === h.pendingFetches.length && h.pendingFetches[0].url.endsWith('/suggest'), 'popup input focus did not start its empty suggestion interaction');
+		h.popup.input.value = 'nova';
+		h.dispatch(h.popup.input, 'input');
+		h.advanceTimers(250);
+		await h.resolveJson(1, threeResults());
 		const focusables = h.popup.root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])');
-		assert(focusables.length >= 3, 'popup fixture did not expose a real focus cycle');
+		assert(7 === focusables.length, 'popup focus cycle did not include three production result links and view-all');
+		assert(focusables[3].classList.contains('ys-ss-item'), 'first dynamic result link is missing from the popup focus cycle');
+		assert(focusables[6].classList.contains('ys-ss-viewall'), 'dynamic view-all is not the last popup focusable');
 		focusables[focusables.length - 1].focus();
 		h.dispatch(h.document, 'keydown', { key: 'Tab' });
 		assert(h.document.activeElement === focusables[0], 'Tab did not wrap from last to first popup control');
@@ -70,5 +83,22 @@ runTests([
 		h.dispatch(h.document, 'keydown', { key: 'Escape' });
 		assert(h.popup.root.hidden, 'Escape did not close popup');
 		assert(h.document.activeElement === secondTrigger, 'popup focus did not return to the exact second opener');
+	}],
+	['popup focus cycle includes a production-rendered fallback chip', async () => {
+		const h = createHarness({ formCount: 0, popup: true, triggerCount: 2 });
+		h.triggers[1].click();
+		h.advanceTimers(30);
+		assert(1 === h.pendingFetches.length && h.pendingFetches[0].url.endsWith('/suggest'), 'popup focus did not start the cold suggest fixture');
+		h.popup.input.value = 'zero';
+		h.dispatch(h.popup.input, 'input');
+		h.advanceTimers(250);
+		await h.resolveJson(1, { q: 'zero', total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
+		await h.resolveJson(0, { items: [{ term: 'fallback-chip' }] });
+		const focusables = h.popup.root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])');
+		assert(4 === focusables.length, 'popup focus cycle did not include the production fallback chip');
+		assert(focusables[3].classList.contains('ys-ss-chip'), 'production fallback chip is not the last popup focusable');
+		focusables[3].focus();
+		h.dispatch(h.document, 'keydown', { key: 'Tab' });
+		assert(h.document.activeElement === h.popup.close, 'Tab did not wrap from dynamic chip to popup close');
 	}],
 ]);
