@@ -65,21 +65,30 @@ final class YSSsInjectionGuard {
 		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
 		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
 
+		// These bounded fragments recognize only high-signal scalar statement shapes; they are not a
+		// general SQL parser and deliberately do not turn ordinary command verbs into attack signals.
+		$sql_identifier        = '`?[\p{L}\p{N}_.$-]+`?';
+		$sql_number            = '[+-]?(?:0x[0-9a-f]+|0b[01]+|\d+(?:\.\d+)?|\.\d+)';
+		$sql_number_expression = $sql_number
+			. '(?:\s*(?:<=>|<>|!=|<=|>=|[+*/%<>=-])\s*' . $sql_number . '){0,8}';
+		$sql_scalar            = '(?:null|true|false'
+			. '|(?:database|version|user|current_user|system_user|session_user|connection_id|last_insert_id)\s*\(\s*\)'
+			. '|' . $sql_number_expression . ')';
+		$sql_scalar_item       = $sql_scalar . '(?:\s+as\s+' . $sql_identifier . ')?';
+
 		// Stacked-query probes require both a statement separator and a recognizable SQL statement
 		// shape. A bare natural-language verb after a semicolon is not enough to reject a search.
 		if ( preg_match(
 			'~;\s*(?:
 				select\s+(?:
 					@@[\p{L}\p{N}_$]+
-					|(?:null|true|false)\s*(?:;|--|\#|$)
-					|(?:database|version|user|current_user|system_user|session_user|connection_id|last_insert_id)\s*\(\s*\)\s*(?:;|--|\#|$)
-					|[+-]?(?:0x[0-9a-f]+|0b[01]+|\d+(?:\.\d+)?|\.\d+)(?:\s*(?:<=>|<>|!=|<=|>=|[+*/%<>=-])\s*[+-]?(?:0x[0-9a-f]+|0b[01]+|\d+(?:\.\d+)?|\.\d+)){0,8}\s*(?:;|--|\#|$)
+					|' . $sql_scalar_item . '(?:\s*,\s*' . $sql_scalar_item . '){0,7}\s*(?:;|--|\#|$)
 					|[^;\r\n]{1,160}?\bfrom\b
 				)
-				|(?:insert|replace)\s+(?:(?:low_priority|delayed|high_priority)\s+)?(?:ignore\s+)?(?:into\s+)?`?[\p{L}\p{N}_.$-]+`?(?:\s*\([^;\r\n]{1,160}\))?\s+(?:values?|set|select)\b
-				|update\s+`?[\p{L}\p{N}_.$-]+`?\s+set\b
-				|delete\s+(?:(?:low_priority|quick|ignore)\s+){0,3}(?:from\b|`?[\p{L}\p{N}_.$-]+`?(?:\s*,\s*`?[\p{L}\p{N}_.$-]+`?){0,15}\s+from\b)
-				|drop\s+(?:table|database|schema|view|index|trigger|procedure|function|event|user)\b
+				|(?:insert|replace)\s+(?:(?:low_priority|delayed|high_priority)\s+)?(?:ignore\s+)?(?:into\s+)?' . $sql_identifier . '(?:\s*\([^;\r\n]{1,160}\))?\s+(?:values?|set|select)\b
+				|update\s+(?:(?:low_priority|ignore)\s+){0,2}' . $sql_identifier . '\s+set\b
+				|delete\s+(?:(?:low_priority|quick|ignore)\s+){0,3}(?:from\b|' . $sql_identifier . '(?:\s*,\s*' . $sql_identifier . '){0,15}\s+from\b)
+				|drop\s+(?:(?:temporary\s+)?table|database|schema|view|index|trigger|procedure|function|event|user)\b
 				|alter\s+(?:table|database|schema|view|user)\b
 				|create\s+(?:table|database|schema|view|index|trigger|procedure|function|event|user)\b
 				|truncate\s+(?:table\s+)?`?[\p{L}\p{N}_.$-]+`?
