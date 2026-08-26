@@ -300,11 +300,11 @@ fix: scope analytics identifiers to matching tokens
 
 - [ ] **Step 1: Add cross-midnight failing tests**
 
-Use literal timestamps `1787673570` (2026-08-25 23:59:30 UTC) and `1787673615` (2026-08-26 00:00:15 UTC). With fixed IP/UA, prove:
+Use literal timestamps `1787702370` (2026-08-25 23:59:30 UTC) and `1787702415` (2026-08-26 00:00:15 UTC). With fixed IP/UA, prove:
 
 ```php
-$issue = 1787673570;
-$verify = 1787673615;
+$issue = 1787702370;
+$verify = 1787702415;
 $visitor = YSSsRateLimiter::visitor_hash_at($issue);
 $receipt = YSSsLogReceipt::issue('nova', 5, 'products', $visitor, $issue);
 $claims = YSSsLogReceipt::verify_for_request($receipt, 'nova', $verify);
