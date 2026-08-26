@@ -84,18 +84,20 @@
 			if (null === confirmed) { throw new Error('invalid keyword mutation payload'); }
 			keywordItems = confirmed;
 			committed = true;
+			// Per-control settlement belongs to this request. A later operation may suppress the
+			// shared table redraw/message, but cannot make an already committed control look undone.
+			if (callbacks.onSuccess) { callbacks.onSuccess(payload); }
 			if (operation === keywordOperationGeneration) {
 				redrawKeywordItems();
-				if (callbacks.onSuccess) { callbacks.onSuccess(payload); }
 				if (callbacks.showMessage) {
 					callbacks.showMessage(messageWithCacheStatus(callbacks.successMessage || '✓ 關鍵字已更新', payload));
 				}
 			}
 			return payload;
 		}).catch(function () {
+			if (callbacks.onFailure) { callbacks.onFailure(); }
 			if (operation === keywordOperationGeneration) {
 				redrawKeywordItems();
-				if (callbacks.onFailure) { callbacks.onFailure(); }
 				if (callbacks.showMessage) {
 					callbacks.showMessage(callbacks.failureMessage || KEYWORD_FAILURE_MESSAGE);
 				}
@@ -104,7 +106,7 @@
 		}).finally(function () {
 			if (!control) { return; }
 			pendingKeywordControls.delete(control);
-			if (!(committed && operation === keywordOperationGeneration && callbacks.keepDisabledOnSuccess)) {
+			if (!(committed && callbacks.keepDisabledOnSuccess)) {
 				control.disabled = false;
 			}
 		});

@@ -115,6 +115,54 @@ async function testInvalidResponsesRestore() {
 	}
 }
 
+async function testPerControlSettlementSurvivesNewerQueue() {
+	const addRequest = deferred();
+	const sortRequest = deferred();
+	const pending = [addRequest, sortRequest];
+	let calls = 0;
+	const harness = createAdminHarness({
+		settings: true,
+		initialKeywords: initialItems,
+		fetch() {
+			return pending[calls++].promise;
+		},
+	});
+	const add = harness.ids.get('ys-ss-kw-add');
+	const input = harness.ids.get('ys-ss-kw-input');
+	const sort = keywordControl(harness, 'ys-ss-kw-sort');
+	input.value = 'Committed add';
+	add.dispatch('click');
+	sort.value = '9';
+	sort.dispatch('change');
+	await flush();
+	if (1 !== calls) { throw new Error('settings per-control fixture did not serialize requests'); }
+
+	addRequest.resolve(jsonResponse(true, {
+		items: [
+			{ id: 1, keyword: 'Alpha', sort_order: 0, is_active: true },
+			{ id: 2, keyword: 'Committed add', sort_order: 0, is_active: true },
+		],
+		cache_status: 'rotated',
+	}));
+	await flush();
+	if ('' !== input.value) {
+		throw new Error('older committed add did not run its per-control success callback while a newer control was queued');
+	}
+	if (2 !== calls) { throw new Error('newer settings operation did not begin after committed add'); }
+	sortRequest.reject(new Error('SECRET newer settings failure'));
+	await flush();
+	const terms = harness.keywordBody.children
+		.map((row) => findNode(row, (node) => 'ys-ss-kw-edit' === node.className))
+		.filter(Boolean)
+		.map((node) => node.value);
+	if (!terms.includes('Committed add')) {
+		throw new Error('newer settings failure did not restore the older committed snapshot');
+	}
+	if (harness.ids.get('ys-ss-save-msg').textContent.includes('SECRET')) {
+		throw new Error('newer settings failure leaked detail');
+	}
+}
+
 async function testAllSettingsOperationsAndWarnings() {
 	let items = initialItems;
 	const requests = [];
@@ -249,11 +297,65 @@ async function testAnalyticsOnlySharedRunner() {
 	}
 }
 
+async function testAnalyticsControlsSettleIndependently() {
+	const first = deferred();
+	const second = deferred();
+	const pending = [first, second];
+	let keywordCalls = 0;
+	const harness = createAdminHarness({
+		analytics: true,
+		fetch(url) {
+			if (url.includes('/overview?')) {
+				return response(true, {
+					kpi: { total: 2, unique: 2, zero: 0, zero_rate: 0 },
+					trend: [],
+					top: [
+						{ term: 'alpha', hits: 1, zero_hits: 0 },
+						{ term: 'beta', hits: 1, zero_hits: 0 },
+					],
+					zero: [],
+				});
+			}
+			if (url.endsWith('/keywords')) {
+				return pending[keywordCalls++].promise;
+			}
+			throw new Error('unexpected fetch: ' + url);
+		},
+	});
+	await flush();
+	const addButtons = harness.buttons.filter((button) => '＋設為關鍵字' === button.textContent);
+	if (2 !== addButtons.length) { throw new Error('analytics independent-control fixture did not render two adds'); }
+	addButtons[0].dispatch('click');
+	addButtons[1].dispatch('click');
+	await flush();
+	if (1 !== keywordCalls) { throw new Error('analytics independent-control fixture did not serialize'); }
+
+	first.resolve(jsonResponse(true, {
+		items: [{ id: 1, keyword: 'alpha', sort_order: 0, is_active: true }],
+		cache_status: 'rotated',
+	}));
+	await flush();
+	if ('✓ 已加入' !== addButtons[0].textContent || !addButtons[0].disabled) {
+		throw new Error('older committed analytics control was made to look uncommitted by a newer queued control');
+	}
+	if (2 !== keywordCalls) { throw new Error('second analytics control did not begin'); }
+	second.reject(new Error('SECRET beta failure'));
+	await flush();
+	if (addButtons[1].disabled || '＋設為關鍵字' !== addButtons[1].textContent) {
+		throw new Error('failed newer analytics control did not recover independently');
+	}
+	if ('✓ 已加入' !== addButtons[0].textContent || !addButtons[0].disabled) {
+		throw new Error('newer failure rolled back an older committed analytics control');
+	}
+}
+
 (async () => {
 	await testQueueRecovery();
 	await testInvalidResponsesRestore();
+	await testPerControlSettlementSurvivesNewerQueue();
 	await testAllSettingsOperationsAndWarnings();
 	await testAnalyticsOnlySharedRunner();
+	await testAnalyticsControlsSettleIndependently();
 })().catch((error) => {
 	console.error(error.message);
 	process.exitCode = 1;

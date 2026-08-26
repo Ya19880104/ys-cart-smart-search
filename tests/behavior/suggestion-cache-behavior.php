@@ -44,7 +44,7 @@ ysss_test('cached suggestions pass through the final raw-input filter', static f
             ['term' => 'nova', 'source' => 'auto'],
         ],
     ];
-    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 1;
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = '1';
     YSSsWpFake::$transients['ys_ss_suggest_cache'] = $unsafe;
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = $unsafe;
     $payload = YSSsSuggestService::suggestions();
@@ -395,6 +395,25 @@ ysss_test('malformed stored generation is non-cacheable and never falls back to 
     ysss_assert_same([['term' => 'fresh-malformed', 'source' => 'external']], $payload['items'] ?? null);
     ysss_assert_same([], YSSsWpFake::$transientGets, 'Malformed generation read a historical cache key');
     ysss_assert_same([], YSSsWpFake::$transientSets, 'Malformed generation published a cache key');
+});
+
+ysss_test('non-string scalar generation aliases never activate historical v1 cache', static function (): void {
+    foreach ([1, true] as $malformed) {
+        YSSsWpFake::reset();
+        YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $malformed;
+        YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
+            'count' => 1,
+            'recent_enabled' => true,
+            'items' => [['term' => 'scalar-alias-stale', 'source' => 'manual']],
+        ];
+        $GLOBALS['wpdb']->columnSets = [[], []];
+        add_filter('ys_ss_suggestions', static fn(array $items): array => [['term' => 'scalar-alias-fresh', 'source' => 'external']]);
+
+        $payload = YSSsSuggestService::suggestions();
+        ysss_assert_same([['term' => 'scalar-alias-fresh', 'source' => 'external']], $payload['items'] ?? null);
+        ysss_assert_same([], YSSsWpFake::$transientGets, 'Non-string scalar generation read historical v1');
+        ysss_assert_same([], YSSsWpFake::$transientSets, 'Non-string scalar generation published historical v1');
+    }
 });
 
 ysss_test('update true with unchanged generation resolves from final readback as bypass', static function (): void {

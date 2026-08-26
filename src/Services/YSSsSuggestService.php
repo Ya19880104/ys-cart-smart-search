@@ -220,10 +220,10 @@ final class YSSsSuggestService {
 		if ( null === $value ) {
 			return [ 'cacheable' => true, 'generation' => '1' ];
 		}
-		if ( ! is_scalar( $value ) ) {
+		if ( ! is_string( $value ) ) {
 			return [ 'cacheable' => false, 'generation' => '' ];
 		}
-		$token = (string) $value;
+		$token = $value;
 		return 1 === preg_match( '/\A[a-z0-9_-]{1,64}\z/iD', $token )
 			? [ 'cacheable' => true, 'generation' => $token ]
 			: [ 'cacheable' => false, 'generation' => '' ];
