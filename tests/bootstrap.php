@@ -199,6 +199,25 @@ final class YSSsFakeWpdb
                 ['TABLE_NAME' => $this->prefix . 'ys_ss_terms_daily', 'ENGINE' => 'InnoDB'],
             ];
         }
+        $authorityPattern = '/\ASELECT\s+option_name\s*,\s*option_value'
+            . '\s+FROM\s+`?' . preg_quote($this->prefix . 'options', '/') . '`?'
+            . "\s+WHERE\s+option_name\s+IN\s*\(\s*'ys_ss_suggest_cache_generation'"
+            . "\s*,\s*'(ys_ss_suggest_tombstone_[a-f0-9]{64})'\s*\)\s*\z/iD";
+        if (1 === preg_match($authorityPattern, trim($query), $authorityMatch)) {
+            $names = ['ys_ss_suggest_cache_generation', $authorityMatch[1]];
+            $rows = [];
+            foreach ($names as $name) {
+                if (array_key_exists($name, YSSsWpFake::$options)) {
+                    $rows[] = [
+                        'option_name' => $name,
+                        'option_value' => is_string(YSSsWpFake::$options[$name])
+                            ? YSSsWpFake::$options[$name]
+                            : (string) YSSsWpFake::$options[$name],
+                    ];
+                }
+            }
+            return $rows;
+        }
         return [] === $this->resultSets ? [] : (array) array_shift($this->resultSets);
     }
 
