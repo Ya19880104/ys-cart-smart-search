@@ -184,6 +184,40 @@ ysss_test('durable marker makes a failed generation write bypass fresh and delet
     ysss_assert_false(isset(YSSsWpFake::$transients['ys_ss_suggest_cache']));
 });
 
+ysss_test('durable final marker overrides an earlier generation update exception', static function (): void {
+    YSSsWpFake::reset();
+    $generation = 'throwing-update';
+    $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
+        throw new RuntimeException('SECRET update provider');
+    };
+
+    $status = YSSsSuggestService::invalidate();
+
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_BYPASS_FRESH, $status);
+    ysss_assert_same($generation, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null);
+    ysss_assert_same($generation, YSSsWpFake::$options[$marker] ?? null, 'Final marker was not durable after update exception');
+});
+
+ysss_test('durable final marker overrides an earlier add exception after persistence', static function (): void {
+    YSSsWpFake::reset();
+    $generation = 'throwing-add';
+    $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
+    YSSsWpFake::$addOptionHandler = static function (string $key, mixed $value, string $deprecated, mixed $autoload): bool {
+        YSSsWpFake::$options[$key] = $value;
+        throw new RuntimeException('SECRET add provider');
+    };
+
+    $status = YSSsSuggestService::invalidate();
+
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_BYPASS_FRESH, $status);
+    ysss_assert_same($generation, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null);
+    ysss_assert_same($generation, YSSsWpFake::$options[$marker] ?? null, 'Final marker was not durable after add exception');
+    ysss_assert_same([], YSSsWpFake::$optionUpdateCalls, 'Add exception unexpectedly attempted generation rotation');
+});
+
 ysss_test('total authority persistence failure returns failed while still deleting old caches', static function (): void {
     YSSsWpFake::reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old9';

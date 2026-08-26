@@ -163,6 +163,79 @@ async function testPerControlSettlementSurvivesNewerQueue() {
 	}
 }
 
+async function testCommittedCacheWarningSurvivesNewerFailure() {
+	const addRequest = deferred();
+	const sortRequest = deferred();
+	const recoveryRequest = deferred();
+	const pending = [addRequest, sortRequest, recoveryRequest];
+	let calls = 0;
+	const harness = createAdminHarness({
+		settings: true,
+		initialKeywords: initialItems,
+		fetch() {
+			return pending[calls++].promise;
+		},
+	});
+	const add = harness.ids.get('ys-ss-kw-add');
+	const input = harness.ids.get('ys-ss-kw-input');
+	const sort = keywordControl(harness, 'ys-ss-kw-sort');
+	input.value = 'Committed warning add';
+	add.dispatch('click');
+	sort.value = '7';
+	sort.dispatch('change');
+	await flush();
+
+	addRequest.resolve(jsonResponse(true, {
+		items: [
+			{ id: 1, keyword: 'Alpha', sort_order: 0, is_active: true },
+			{ id: 2, keyword: 'Committed warning add', sort_order: 0, is_active: true },
+		],
+		cache_status: 'failed',
+		cache_warning: 'SECRET SQL A WARNING',
+	}));
+	await flush();
+	if ('' !== input.value) {
+		throw new Error('cache-warning commit did not settle its input while a newer control was queued');
+	}
+	if (2 !== calls) { throw new Error('newer cache-warning fixture request did not begin'); }
+	let message = harness.ids.get('ys-ss-save-msg').textContent;
+	if (!message.includes(WARNING) || message.includes('SECRET')) {
+		throw new Error('stale-redraw committed cache warning was not delivered as fixed local text');
+	}
+
+	sortRequest.reject(new Error('SECRET newer settings failure'));
+	await flush();
+	const terms = harness.keywordBody.children
+		.map((row) => findNode(row, (node) => 'ys-ss-kw-edit' === node.className))
+		.filter(Boolean)
+		.map((node) => node.value);
+	if (!terms.includes('Committed warning add')) {
+		throw new Error('newer failure did not restore the cache-warning commit snapshot');
+	}
+	message = harness.ids.get('ys-ss-save-msg').textContent;
+	if (!message.includes('關鍵字更新失敗，請稍後再試。') || !message.includes(WARNING) || message.includes('SECRET')) {
+		throw new Error('newer failure lost or leaked the pending cache authority warning');
+	}
+
+	const toggle = findNode(harness.keywordBody, (node) => 'checkbox' === node.type);
+	toggle.checked = false;
+	toggle.dispatch('change');
+	await flush();
+	recoveryRequest.resolve(jsonResponse(true, {
+		items: [
+			{ id: 1, keyword: 'Alpha', sort_order: 0, is_active: false },
+			{ id: 2, keyword: 'Committed warning add', sort_order: 0, is_active: true },
+		],
+		cache_status: 'rotated',
+		cache_warning: 'SECRET SQL RECOVERY WARNING',
+	}));
+	await flush();
+	message = harness.ids.get('ys-ss-save-msg').textContent;
+	if (!message.includes('✓ 關鍵字已更新') || message.includes(WARNING) || message.includes('SECRET')) {
+		throw new Error('later authoritative rotation did not clear the pending fixed cache warning');
+	}
+}
+
 async function testAllSettingsOperationsAndWarnings() {
 	let items = initialItems;
 	const requests = [];
@@ -353,6 +426,7 @@ async function testAnalyticsControlsSettleIndependently() {
 	await testQueueRecovery();
 	await testInvalidResponsesRestore();
 	await testPerControlSettlementSurvivesNewerQueue();
+	await testCommittedCacheWarningSurvivesNewerFailure();
 	await testAllSettingsOperationsAndWarnings();
 	await testAnalyticsOnlySharedRunner();
 	await testAnalyticsControlsSettleIndependently();

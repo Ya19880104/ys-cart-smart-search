@@ -136,7 +136,7 @@ final class YSSsSuggestService {
 		$captured     = $state['generation'];
 		$captured_ok  = $state['cacheable'];
 		$marker_name  = $captured_ok ? self::tombstone_name( $captured ) : '';
-		$marker_error = false;
+		$may_rotate   = true;
 
 		if ( $captured_ok ) {
 			try {
@@ -145,7 +145,9 @@ final class YSSsSuggestService {
 				// identical marker already exists.
 				self::is_tombstoned( $captured );
 			} catch ( \Throwable $error ) {
-				$marker_error = true;
+				// The final strict readback remains authoritative even when the storage adapter
+				// throws after persisting. Do not risk rotating without an observed pre-write marker.
+				$may_rotate = false;
 			}
 		}
 
@@ -163,22 +165,23 @@ final class YSSsSuggestService {
 			$token = null;
 		}
 
-		$rotation_error = false;
-		if ( null !== $token && ! $marker_error ) {
+		if ( null !== $token && $may_rotate ) {
 			try {
 				// The boolean is not mutation truth: idempotence, races, and storage layers can all
 				// return false. Final readback below is the sole authority.
 				update_option( self::GENERATION_OPTION, $token, false );
 			} catch ( \Throwable $error ) {
-				$rotation_error = true;
+				// Contain the adapter failure. Final generation and marker readbacks decide status.
 			}
 		}
 
-		$final_state = [ 'cacheable' => false, 'generation' => '' ];
+		$final_state      = [ 'cacheable' => false, 'generation' => '' ];
+		$final_state_read = false;
 		try {
-			$final_state = self::generation_state();
+			$final_state      = self::generation_state();
+			$final_state_read = true;
 		} catch ( \Throwable $error ) {
-			$rotation_error = true;
+			// An unreadable final generation can never be promoted to a successful status.
 		}
 
 		if ( $captured_ok ) {
@@ -186,7 +189,7 @@ final class YSSsSuggestService {
 		}
 		self::delete_transient_safely( self::LEGACY_CACHE_KEY );
 
-		if ( $final_state['cacheable']
+		if ( $final_state_read && $final_state['cacheable']
 			&& ( ! $captured_ok || $final_state['generation'] !== $captured ) ) {
 			if ( $captured_ok ) {
 				self::delete_option_safely( $marker_name );
@@ -195,16 +198,17 @@ final class YSSsSuggestService {
 		}
 
 		$marker_durable = false;
-		if ( $captured_ok && $final_state['cacheable'] && $final_state['generation'] === $captured ) {
+		if ( $final_state_read && $captured_ok
+			&& $final_state['cacheable'] && $final_state['generation'] === $captured ) {
 			try {
 				// Re-read at the decision point; an early successful read is not final authority.
 				$marker_durable = self::is_tombstoned( $captured );
 			} catch ( \Throwable $error ) {
-				$marker_error = true;
+				$marker_durable = false;
 			}
 		}
 
-		return $marker_durable && ! $marker_error && ! $rotation_error
+		return $marker_durable
 			? self::INVALIDATION_BYPASS_FRESH
 			: self::INVALIDATION_FAILED;
 	}

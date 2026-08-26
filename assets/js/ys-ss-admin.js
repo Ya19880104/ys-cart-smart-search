@@ -26,9 +26,24 @@
 	var keywordItems = [];
 	var keywordRenderer = null;
 	var pendingKeywordControls = new WeakSet();
+	var keywordCacheWarningPending = false;
 
 	function messageWithCacheStatus(message, payload) {
 		return payload && 'failed' === payload.cache_status
+			? message + '\n' + CACHE_WARNING_MESSAGE
+			: message;
+	}
+
+	function applyKeywordCacheAuthority(payload) {
+		if (payload && 'failed' === payload.cache_status) {
+			keywordCacheWarningPending = true;
+		} else if (payload && ('rotated' === payload.cache_status || 'bypass_fresh' === payload.cache_status)) {
+			keywordCacheWarningPending = false;
+		}
+	}
+
+	function messageWithPendingKeywordWarning(message) {
+		return keywordCacheWarningPending
 			? message + '\n' + CACHE_WARNING_MESSAGE
 			: message;
 	}
@@ -84,14 +99,19 @@
 			if (null === confirmed) { throw new Error('invalid keyword mutation payload'); }
 			keywordItems = confirmed;
 			committed = true;
+			applyKeywordCacheAuthority(payload);
 			// Per-control settlement belongs to this request. A later operation may suppress the
 			// shared table redraw/message, but cannot make an already committed control look undone.
 			if (callbacks.onSuccess) { callbacks.onSuccess(payload); }
 			if (operation === keywordOperationGeneration) {
 				redrawKeywordItems();
 				if (callbacks.showMessage) {
-					callbacks.showMessage(messageWithCacheStatus(callbacks.successMessage || '✓ 關鍵字已更新', payload));
+					callbacks.showMessage(messageWithPendingKeywordWarning(callbacks.successMessage || '✓ 關鍵字已更新'));
 				}
+			} else if ('failed' === payload.cache_status && callbacks.showMessage) {
+				// A later queued control may suppress this response's redraw, but cannot erase a
+				// committed cache-authority warning. Only local fixed text crosses this boundary.
+				callbacks.showMessage(CACHE_WARNING_MESSAGE);
 			}
 			return payload;
 		}).catch(function () {
@@ -99,7 +119,7 @@
 			if (operation === keywordOperationGeneration) {
 				redrawKeywordItems();
 				if (callbacks.showMessage) {
-					callbacks.showMessage(callbacks.failureMessage || KEYWORD_FAILURE_MESSAGE);
+					callbacks.showMessage(messageWithPendingKeywordWarning(callbacks.failureMessage || KEYWORD_FAILURE_MESSAGE));
 				}
 			}
 			return null;
