@@ -31,12 +31,16 @@ final class YSSsRateLimiter {
 	}
 
 	/**
-	 * 訪客雜湊：IP+UA+當日鹽 → 16 字截斷。
+	 * 訪客雜湊：IP+UA+指定 UTC 日期鹽 → 16 字截斷。
 	 * 只能做「同日去重」維度，無法跨日追蹤、無法回推（無 PII 入庫）。
 	 */
-	public static function visitor_hash(): string {
+	public static function visitor_hash_at( int $timestamp ): string {
 		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '';   // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		$ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) $_SERVER['HTTP_USER_AGENT'] : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
-		return substr( hash( 'sha256', $ip . '|' . $ua . '|' . gmdate( 'Ymd' ) . '|' . wp_salt( 'nonce' ) ), 0, 16 );
+		return substr( hash( 'sha256', $ip . '|' . $ua . '|' . gmdate( 'Ymd', $timestamp ) . '|' . wp_salt( 'nonce' ) ), 0, 16 );
+	}
+
+	public static function visitor_hash(): string {
+		return self::visitor_hash_at( time() );
 	}
 }

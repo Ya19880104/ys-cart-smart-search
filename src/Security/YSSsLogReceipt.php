@@ -22,19 +22,20 @@ final class YSSsLogReceipt {
 	private const MAX_TOKEN_BYTES   = 1024;
 	private const MAX_PAYLOAD_BYTES = 768;
 
-	public static function issue( string $query, int $total, string $content_types, string $visitor_hash ): string {
-		$query = self::bounded_query( $query );
-		if ( '' === $query ) {
+	public static function issue( string $query, int $total, string $content_types, string $visitor_hash, ?int $now = null ): string {
+		$now          = $now ?? time();
+		$query        = self::bounded_query( $query );
+		$visitor_hash = self::bounded_visitor( $visitor_hash );
+		if ( '' === $query || '' === $visitor_hash ) {
 			return '';
 		}
 
-		$now    = time();
 		$claims = [
 			'v'   => self::VERSION,
 			'q'   => $query,
 			't'   => max( 0, min( self::MAX_TOTAL, $total ) ),
 			'c'   => self::normalize_content_types( $content_types ),
-			'vh'  => self::bounded_visitor( $visitor_hash ),
+			'vh'  => $visitor_hash,
 			'iat' => $now,
 			'exp' => $now + self::TTL_SECONDS,
 		];
@@ -51,9 +52,43 @@ final class YSSsLogReceipt {
 	}
 
 	/**
-	 * @return array{query:string,total:int,content_types:string}|null
+	 * @return array{query:string,total:int,content_types:string,visitor_hash:string}|null
 	 */
-	public static function verify( string $receipt, string $query, string $visitor_hash ): ?array {
+	public static function verify( string $receipt, string $query, string $visitor_hash, ?int $now = null ): ?array {
+		$now     = $now ?? time();
+		$claims  = self::verified_claims( $receipt, $query, $now );
+		$visitor = self::bounded_visitor( $visitor_hash );
+		if ( null === $claims || '' === $visitor || ! hash_equals( $claims['visitor_hash'], $visitor ) ) {
+			return null;
+		}
+
+		return self::public_claims( $claims );
+	}
+
+	/**
+	 * Verify a public log request against the visitor identity from the signed issue day.
+	 *
+	 * @return array{query:string,total:int,content_types:string,visitor_hash:string}|null
+	 */
+	public static function verify_for_request( string $receipt, string $query, ?int $now = null ): ?array {
+		$now    = $now ?? time();
+		$claims = self::verified_claims( $receipt, $query, $now );
+		if ( null === $claims ) {
+			return null;
+		}
+
+		$visitor = YSSsRateLimiter::visitor_hash_at( $claims['iat'] );
+		if ( ! hash_equals( $claims['visitor_hash'], $visitor ) ) {
+			return null;
+		}
+
+		return self::public_claims( $claims );
+	}
+
+	/**
+	 * @return array{query:string,total:int,content_types:string,visitor_hash:string,iat:int}|null
+	 */
+	private static function verified_claims( string $receipt, string $query, int $now ): ?array {
 		if ( '' === $receipt || strlen( $receipt ) > self::MAX_TOKEN_BYTES || 1 !== substr_count( $receipt, '.' ) ) {
 			return null;
 		}
@@ -84,15 +119,17 @@ final class YSSsLogReceipt {
 			return null;
 		}
 
-		$now = time();
+		$claim_visitor = self::bounded_visitor( $claims['vh'] );
 		if ( $claims['t'] < 0 || $claims['t'] > self::MAX_TOTAL
 			|| $claims['exp'] - $claims['iat'] !== self::TTL_SECONDS
 			|| $claims['iat'] > $now + 30
 			|| $claims['exp'] < $now
+			|| '' === $claims['q']
 			|| $claims['q'] !== self::bounded_query( $claims['q'] )
 			|| $claims['c'] !== self::normalize_content_types( $claims['c'] )
 			|| ! hash_equals( $claims['q'], self::bounded_query( $query ) )
-			|| ! hash_equals( $claims['vh'], self::bounded_visitor( $visitor_hash ) ) ) {
+			|| '' === $claim_visitor
+			|| ! hash_equals( $claims['vh'], $claim_visitor ) ) {
 			return null;
 		}
 
@@ -100,6 +137,21 @@ final class YSSsLogReceipt {
 			'query'         => $claims['q'],
 			'total'         => $claims['t'],
 			'content_types' => $claims['c'],
+			'visitor_hash'  => $claims['vh'],
+			'iat'           => $claims['iat'],
+		];
+	}
+
+	/**
+	 * @param array{query:string,total:int,content_types:string,visitor_hash:string,iat:int} $claims
+	 * @return array{query:string,total:int,content_types:string,visitor_hash:string}
+	 */
+	private static function public_claims( array $claims ): array {
+		return [
+			'query'         => $claims['query'],
+			'total'         => $claims['total'],
+			'content_types' => $claims['content_types'],
+			'visitor_hash'  => $claims['visitor_hash'],
 		];
 	}
 

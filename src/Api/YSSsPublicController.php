@@ -69,12 +69,15 @@ final class YSSsPublicController {
 			(array) ( $result['content_types'] ?? [] ),
 			static fn( $type ): bool => is_string( $type ) && '' !== $type
 		) );
+		$now     = time();
+		$visitor = YSSsRateLimiter::visitor_hash_at( $now );
 		$result['total'] = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['total'] ?? 0 ) ) );
 		$result['log_receipt'] = YSSsLogReceipt::issue(
 			(string) ( $result['q'] ?? '' ),
 			(int) ( $result['total'] ?? 0 ),
 			implode( ',', array_values( array_unique( $types ) ) ),
-			YSSsRateLimiter::visitor_hash()
+			$visitor,
+			$now
 		);
 
 		$response = rest_ensure_response( $result );
@@ -111,15 +114,14 @@ final class YSSsPublicController {
 			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
-		$source  = 'popup' === $source_param ? 'popup' : 'bar';
-		$visitor = YSSsRateLimiter::visitor_hash();
-		$claims  = YSSsLogReceipt::verify( $receipt_param, $q, $visitor );
+		$source = 'popup' === $source_param ? 'popup' : 'bar';
+		$claims = YSSsLogReceipt::verify_for_request( $receipt_param, $q );
 		if ( null === $claims ) {
 			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
 		try {
-			YSSsQueryRepository::log( $claims['query'], $claims['total'], $claims['content_types'], $source, $visitor );
+			YSSsQueryRepository::log( $claims['query'], $claims['total'], $claims['content_types'], $source, $claims['visitor_hash'] );
 		} catch ( \Throwable $e ) {
 			// 分析旁路：任何寫入失敗都不回錯誤給前台。
 		}

@@ -29,6 +29,7 @@ $analytics = $read('src/Admin/YSSsAnalyticsAdmin.php');
 $short     = $read('src/Frontend/YSSsShortcodes.php');
 $cron      = $read('src/Cron/YSSsCronBridge.php');
 $limiter   = $read('src/Security/YSSsRateLimiter.php');
+$receipt   = $read('src/Security/YSSsLogReceipt.php');
 $frontJs   = $read('assets/js/ys-ss-front.js');
 $log       = $read('CHANGELOG.md');
 
@@ -92,14 +93,19 @@ $check('C8 addon 5 rules (core ns / no admin-ajax / no top menu / YSAdminApp / y
     && str_contains($settingsA, 'YSAdminApp::open')
     && str_contains($settingsA, 'ysca-btn'));
 
-// C9 安全：公開端點限流、log sanitize + 長度限制、admin nonce+capability、無 PII（日鹽 hash）
-$check('C9 security (rate limits / sanitized log / admin nonce+cap / daily-salt hash)',
+// C9 安全：公開端點限流、log sanitize + 長度限制、admin nonce+capability、簽發日 receipt 身分（無 PII）
+$check('C9 security (rate limits / sanitized log / admin nonce+cap / signed issue-day identity)',
     str_contains($pubCtrl, "allow( 'query', 60 )")
     && str_contains($pubCtrl, "allow( 'log', 30 )")
     && str_contains($pubCtrl, 'YSSsSearchInput::inspect')
     && str_contains($admCtrl, "wp_verify_nonce")
     && str_contains($admCtrl, "manage_options")
-    && str_contains($limiter, "gmdate( 'Ymd' )"));
+    && str_contains($limiter, 'function visitor_hash_at')
+    && str_contains($limiter, 'self::visitor_hash_at( time() )')
+    && str_contains($receipt, 'function verify_for_request')
+    && str_contains($receipt, "visitor_hash_at( \$claims['iat'] )")
+    && str_contains($pubCtrl, 'YSSsLogReceipt::verify_for_request')
+    && str_contains($pubCtrl, "\$claims['visitor_hash']"));
 
 // C10 分析旁路：log 失敗不擲回前台、cron 例外吞掉
 $check('C10 analytics is a side-channel (log failures swallowed, cron guarded)',
