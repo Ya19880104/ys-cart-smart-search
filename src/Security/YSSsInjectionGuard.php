@@ -33,12 +33,12 @@ final class YSSsInjectionGuard {
 
 		// XSS／HTML 執行面：攔危險元素與事件／srcdoc 屬性，不攔 C++ <vector> 等一般角括號。
 		if ( preg_match( '~<\s*/?\s*(?:script|svg|img|iframe|object|embed|link|meta|style|form|input|video|audio|body)\b~iu', $scan )
-			|| preg_match( '/<[^>\r\n]{0,512}(?:\s|\/)(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
+			|| preg_match( '/<[^>\r\n]*(?:\s|\/)(?:on[a-z]+|srcdoc)\s*=/iu', $scan ) ) {
 			return true;
 		}
 
 		// 模板執行語法；一般單層大括號與技術詞仍可搜尋。
-		if ( preg_match( '~\{\{[^\r\n]{0,512}\}\}|\$\{[^\r\n]{0,512}\}|#\{[^\r\n]{0,512}\}|\{%[^\r\n]{0,512}%\}|<%[^\r\n]{0,512}%>|#set\s*\(~iu', $scan )
+		if ( preg_match( '~\{\{[^\r\n]*\}\}|\$\{[^\r\n]*\}|#\{[^\r\n]*\}|\{%[^\r\n]*%\}|<%[^\r\n]*%>|#set\s*\(~iu', $scan )
 			|| preg_match( '/\b(?:__globals__|__import__)\b/iu', $scan ) ) {
 			return true;
 		}
@@ -54,16 +54,17 @@ final class YSSsInjectionGuard {
 			return true;
 		}
 
-		// MySQL executable comments can carry a real statement and must be rejected before ordinary
-		// comments are folded. Plain comments remain foldable so UNION/**/SELECT is still visible.
-		if ( preg_match( '~/\*![0-9]{0,6}\s*[^*]{0,512}\*/~iu', $scan ) ) {
+		// MySQL executable comments carry server-executable text. The opener alone is sufficient;
+		// requiring a closing token or bounded body would let truncated/oversized probes through.
+		if ( preg_match( '~/\*!~u', $scan ) ) {
 			return true;
 		}
 
-		// Stacked-query probes require both statement structure and a DDL/DML verb. This deliberately
-		// keeps natural product text such as "Drop Table 桌遊" searchable.
+		// Stacked-query probes require a statement boundary plus an explicit SQL command word.
+		// Optional closing parentheses cover probes such as "'); DROP TABLE" while natural product text
+		// such as "Drop Table 桌遊" remains searchable because it has no injected statement boundary.
 		if ( preg_match(
-			'~(?:[\'"`]\s*;\s*|\b\d+\s*;\s*)(?:select|insert|update|delete|drop|alter|create|truncate)\b[^\r\n]{0,512}(?:;|--|#)(?:\s|$)~iu',
+			'~(?:[\'"`]|\b\d+)\s*\){0,8}\s*;\s*(?:select|insert|replace|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|handler|load|set|show|describe|desc|explain|use|lock|unlock|begin|start|commit|rollback)\b~iu',
 			$scan
 		) ) {
 			return true;
@@ -81,7 +82,7 @@ final class YSSsInjectionGuard {
 		}
 
 		// Shell substitution 或可直接執行命令的函式形狀；單獨反引號／程式書名不攔。
-		if ( preg_match( '/\$\([^\r\n)]{1,512}\)|\b(?:exec|system|shell_exec|passthru|popen|proc_open)\s*\(/iu', $scan ) ) {
+		if ( preg_match( '/\$\([^\r\n)]*\)|\b(?:exec|system|shell_exec|passthru|popen|proc_open)\s*\(/iu', $scan ) ) {
 			return true;
 		}
 

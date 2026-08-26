@@ -346,7 +346,8 @@ $check('C30 original-scope analytics, current-product suggestions, and list fall
 	&& str_contains($search, 'function has_product_match')
 	&& str_contains($suggest, 'YSSsSearchService::has_product_match')
 	&& str_contains($short, 'function maybe_log_list_search')
-	&& str_contains($frontJs, 'ys_ss_client_logged'));
+	&& str_contains($short, 'YSSsLogReceipt::verify_for_request')
+	&& str_contains($frontJs, 'ys_ss_log_receipt'));
 
 echo "\nv1.5.3 contract: PASS={$pass} FAIL={$fail}\n";
 if ($fail > 0) {

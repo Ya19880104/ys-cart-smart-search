@@ -346,7 +346,11 @@ function createHarness(options = {}) {
 
 	const sandbox = {
 		window: { ysSsFront: cfg }, document,
-		navigator: { sendBeacon(url, blob) { beacons.push({ url, blob }); return true; } },
+		navigator: { sendBeacon(url, blob) {
+			if (false === options.sendBeaconResult) { return false; }
+			beacons.push({ url, blob });
+			return true;
+		} },
 		localStorage: createStorage(), sessionStorage: createStorage(), fetch: fetchStub,
 		AbortController: AbortControllerStub,
 		Blob: class Blob { constructor(parts, blobOptions) { this.parts = parts; this.options = blobOptions; } },

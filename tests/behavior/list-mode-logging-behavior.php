@@ -2,11 +2,14 @@
 declare(strict_types=1);
 
 use YangSheep\SmartSearch\Frontend\YSSsShortcodes;
+use YangSheep\SmartSearch\Security\YSSsLogReceipt;
+use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 
 foreach ([
     'src/Security/YSSsInjectionGuard.php',
     'src/Security/YSSsSearchInput.php',
     'src/Security/YSSsRateLimiter.php',
+    'src/Security/YSSsLogReceipt.php',
     'src/Analytics/YSSsAnalyticsAdmission.php',
     'src/Database/YSSsSchema.php',
     'src/Database/YSSsSettings.php',
@@ -47,15 +50,36 @@ ysss_test('list-mode quick submit receives one server-side authoritative analyti
     ysss_assert_same(1, $stored['results_total'] ?? null);
 });
 
-ysss_test('proved client-owned list submit does not receive a duplicate page record', static function (): void {
+ysss_test('signed list receipt is server-authoritative without repeating the product query', static function (): void {
     YSSsWpFake::reset();
-    $_GET = ['ys_ec_search' => 'Quick Nova', 'ys_ss_client_logged' => '1'];
+    $receipt = YSSsLogReceipt::issue_for_request(
+        'quick nova',
+        1,
+        'products',
+        YSSsRateLimiter::visitor_hash(),
+        'Quick Nova'
+    );
+    $_GET = ['ys_ec_search' => 'Quick Nova', 'ys_ss_log_receipt' => $receipt];
     YSSsShortcodes::maybe_log_list_search();
-    ysss_assert_same([], $GLOBALS['wpdb']->inserts);
+    ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Destination did not persist the signed search event');
+    $stored = $GLOBALS['wpdb']->inserts[0]['data'] ?? [];
+    ysss_assert_same(1, $stored['results_total'] ?? null);
     ysss_assert_same([], array_values(array_filter(
         $GLOBALS['wpdb']->queries,
         static fn(string $sql): bool => str_contains($sql, 'ys_ec_products')
-    )), 'Client-owned submit still executed fallback product search');
+    )), 'Valid receipt still repeated the product search');
+    ysss_assert_same([], array_values(array_filter(
+        $GLOBALS['wpdb']->queries,
+        static fn(string $sql): bool => str_contains($sql, 'ys_ss_rate_limits')
+    )), 'Verified destination receipt consumed the public log quota a second time');
+});
+
+ysss_test('unsigned legacy marker cannot suppress the server fallback', static function (): void {
+    YSSsWpFake::reset();
+    $_GET = ['ys_ec_search' => 'Quick Nova', 'ys_ss_client_logged' => '1'];
+    $GLOBALS['wpdb']->resultSets = [[ysss_list_mode_product_row()]];
+    YSSsShortcodes::maybe_log_list_search();
+    ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Unsigned marker suppressed a normal search event');
 });
 
 ysss_test('malicious list-mode ingress never reaches fallback search or analytics', static function (): void {

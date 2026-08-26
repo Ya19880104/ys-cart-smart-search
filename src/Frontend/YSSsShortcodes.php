@@ -10,6 +10,7 @@ namespace YangSheep\SmartSearch\Frontend;
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsLogReceipt;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Security\YSSsSearchInput;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
@@ -37,18 +38,13 @@ final class YSSsShortcodes {
 	}
 
 	/**
-	 * Record a list-mode submit that navigated before the live query produced a signed receipt.
-	 * Proved client-owned submits carry a harmless marker and are not counted twice here.
+	 * Record a list-mode destination. A submitted signed receipt is verified and written with the
+	 * same event identity as the client beacon; missing or invalid receipts use a server search.
 	 */
 	public static function maybe_log_list_search(): void {
 		$settings = YSSsSettings::all();
 		if ( 'list' !== ( $settings['results_mode'] ?? 'list' )
 			|| ! array_key_exists( 'ys_ec_search', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			return;
-		}
-
-		$client_logged = $_GET['ys_ss_client_logged'] ?? ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( is_scalar( $client_logged ) && '1' === (string) wp_unslash( $client_logged ) ) {
 			return;
 		}
 
@@ -63,6 +59,24 @@ final class YSSsShortcodes {
 		}
 
 		try {
+			$receipt_param = $_GET['ys_ss_log_receipt'] ?? ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			if ( is_string( $receipt_param ) && '' !== $receipt_param ) {
+				$receipt  = wp_unslash( $receipt_param );
+				$canonical = YSSsQueryRepository::normalize( $input['query'] );
+				$claims   = YSSsLogReceipt::verify_for_request( $receipt, $canonical, $input['raw'] );
+				if ( null !== $claims && hash_equals( $canonical, $claims['query'] ) ) {
+					$event_hash = hash_hmac( 'sha256', "ys-ss-receipt-event\0" . $receipt, wp_salt( 'nonce' ) );
+					YSSsQueryRepository::log(
+						$claims['query'],
+						$input['raw'],
+						$claims['total'],
+						$claims['content_types'],
+						'bar',
+						$event_hash
+					);
+					return;
+				}
+			}
 			if ( ! YSSsRateLimiter::allow( 'log', 30 ) ) {
 				return;
 			}

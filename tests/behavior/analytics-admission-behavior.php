@@ -24,7 +24,7 @@ ysss_test('analytics admission keeps product and zero-result searches', static f
     ysss_assert_same(YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT, YSSsAnalyticsAdmission::classify('羊毛外套', 3));
     ysss_assert_same(YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO, YSSsAnalyticsAdmission::classify('找不到的羊毛披肩', 0));
     ysss_assert_same(YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT, YSSsAnalyticsAdmission::classify('C++ <vector> 入門', 1));
-    ysss_assert_same(YSSsAnalyticsAdmission::REJECT_EMPTY, YSSsAnalyticsAdmission::classify('---___...', 0));
+    ysss_assert_same(YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO, YSSsAnalyticsAdmission::classify('---___...', 0));
 });
 
 $normalCases = [
@@ -34,6 +34,8 @@ $normalCases = [
     ['UUID product lookup', '550e8400-e29b-41d4-a716-446655440000', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO],
     ['two opaque model numbers', 'AbCdEfGhIjKlMn0pQrStUv1x Yz0123456789AbCdEfGhIjKl', 4, YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT],
     ['fullwidth parameter text', '𝐮𝐭𝐦_𝐬𝐨𝐮𝐫𝐜𝐞=𝐛𝐨𝐭', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO],
+    ['emoji product lookup', '☕', 2, YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT],
+    ['symbol-only zero-result lookup', '❤️', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO],
 ];
 
 foreach ($normalCases as $index => [$label, $query, $total, $expected]) {
@@ -51,6 +53,13 @@ $attackCases = [
     "'; DELETE FROM wp_users; --",
     '1; SELECT * FROM wp_users; --',
     '1 UNION /*!50000 SELECT*/ user_pass FROM wp_users',
+    "'; DROP DATABASE wordpress",
+    "'; SELECT @@version",
+    "'; REPLACE INTO wp_users VALUES (1)",
+    '1 /*!50000 UNION SELECT ' . str_repeat('a', 513) . '*/',
+    '<a ' . str_repeat('x', 513) . ' onmouseover=alert(1)>nova',
+    '{{' . str_repeat('a', 513) . '}}',
+    '$(' . str_repeat('a', 513) . ')',
 ];
 
 foreach ($attackCases as $index => $query) {

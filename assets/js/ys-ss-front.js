@@ -107,20 +107,20 @@
 		return true;
 	}
 
-	function markClientLogged(form) {
-		var marker = form.querySelector('input[name="ys_ss_client_logged"]');
-		if (!marker) {
-			marker = document.createElement('input');
-			marker.type = 'hidden';
-			marker.setAttribute('name', 'ys_ss_client_logged');
-			form.appendChild(marker);
+	function setServerLogReceipt(form, receipt) {
+		var field = form.querySelector('input[name="ys_ss_log_receipt"]');
+		if (!field) {
+			field = document.createElement('input');
+			field.type = 'hidden';
+			field.setAttribute('name', 'ys_ss_log_receipt');
+			form.appendChild(field);
 		}
-		marker.value = '1';
+		field.value = receipt;
 	}
 
-	function clearClientLogged(form) {
-		var marker = form.querySelector('input[name="ys_ss_client_logged"]');
-		if (marker && marker.parentNode) { marker.parentNode.removeChild(marker); }
+	function clearServerLogReceipt(form) {
+		var field = form.querySelector('input[name="ys_ss_log_receipt"]');
+		if (field && field.parentNode) { field.parentNode.removeChild(field); }
 	}
 
 	/* ───────── controller and render ───────── */
@@ -150,7 +150,7 @@
 
 	function beginInteraction(form, mode) {
 		var state = controller(form);
-		clearClientLogged(form);
+		clearServerLogReceipt(form);
 		state.generation += 1;
 		state.mode = mode;
 		clearTimeout(state.settleTimer);
@@ -502,8 +502,9 @@
 			var proof = controller(form).proof;
 			if (!proof || proof.input !== query || !proof.receipt) { return; }
 			if (proof.productsTotal > 0) { recentPush(proof.recentTerm); }
-			if (CFG.resultsMode !== 'page' && logQuery(proof.query, proof.input, proof.receipt, sourceOf(form))) {
-				markClientLogged(form);
+			if (CFG.resultsMode !== 'page') {
+				logQuery(proof.query, proof.input, proof.receipt, sourceOf(form));
+				setServerLogReceipt(form, proof.receipt);
 			}
 		});
 

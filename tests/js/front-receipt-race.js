@@ -26,7 +26,7 @@ runTests([
 		const recent = JSON.parse(h.sandbox.localStorage.getItem('ysss_recent_v2') || '[]');
 		assert(1 === recent.length && 'Alpha Pro' === recent[0], 'positive result did not preserve exact displayed recent search');
 		assert(1 === h.beacons.length && 'receipt-alpha-new' === (h.beaconPayload(0) || {}).receipt, 'older response replaced newest analytics proof');
-		assert('1' === (form.querySelector('input[name="ys_ss_client_logged"]') || {}).value, 'proved list submit did not mark its client-owned analytics event');
+		assert('receipt-alpha-new' === (form.querySelector('input[name="ys_ss_log_receipt"]') || {}).value, 'proved list submit did not carry its signed receipt to the destination');
 	}],
 	['zero result and receipt-less submit preserve v1.5.2 admission rules', async () => {
 		const h = createHarness();
@@ -42,7 +42,20 @@ runTests([
 		recent = JSON.parse(h.sandbox.localStorage.getItem('ysss_recent_v2') || '[]');
 		assert(1 === recent.length && 'Alpha Pro' === recent[0], 'receipt-less quick submit polluted browser recent history');
 		assert(1 === h.beacons.length, 'receipt-less quick submit sent analytics');
-		assert(!form.querySelector('input[name="ys_ss_client_logged"]'), 'receipt-less quick submit suppressed its server-side fallback logger');
+		assert(!form.querySelector('input[name="ys_ss_log_receipt"]'), 'receipt-less quick submit carried stale receipt authority');
+	}],
+	['beacon rejection still carries the signed receipt to server fallback', async () => {
+		const h = createHarness({ sendBeaconResult: false });
+		const { form, input } = h.forms[0];
+		input.value = 'server fallback'; h.dispatch(input, 'input'); h.advanceTimers(250);
+		await h.resolveJson(0, {
+			q: 'server fallback', total: 1, products_total: 1,
+			groups: [{ type: 'products', label: 'results', items: [{ title: 'Fallback', url: '/fallback' }], total: 1 }],
+			view_all: '', log_receipt: 'receipt-server-fallback', recent_term: 'server fallback',
+		});
+		h.dispatch(form, 'submit');
+		assert(0 === h.beacons.length, 'rejected beacon was treated as queued');
+		assert('receipt-server-fallback' === (form.querySelector('input[name="ys_ss_log_receipt"]') || {}).value, 'beacon rejection suppressed the signed server fallback');
 	}],
 	['category-only proof logs analytics but never enters recent history', async () => {
 		const h = createHarness();

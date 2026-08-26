@@ -33,7 +33,7 @@ final class YSSsAnalyticsAdmission {
 		}
 
 		$query = $input['query'];
-		if ( '' === $query || 1 !== preg_match( '/[\p{L}\p{N}]/u', $query ) ) {
+		if ( '' === $query ) {
 			return self::REJECT_EMPTY;
 		}
 
