@@ -39,17 +39,15 @@ final class YSSsAnalyticsAdmission {
 
 		// Inspect the complete accepted ingress, not only SearchInput's 100-character search clamp.
 		// Otherwise a human-looking prefix could hide analytics noise in the discarded tail.
-		$opaque_count            = 0;
-		$recognizable_identifier = false;
+		$opaque_count = 0;
 		foreach ( self::analysis_candidates( $raw, $query ) as $candidate ) {
 			if ( self::has_known_parameter_noise( $candidate ) ) {
 				return self::REJECT_KNOWN_PARAMETER;
 			}
 
-			$opaque_count = max( $opaque_count, self::opaque_token_count( $candidate ) );
-			$recognizable_identifier = $recognizable_identifier || self::has_recognizable_identifier( $candidate );
+			$opaque_count = max( $opaque_count, self::residual_opaque_count( $candidate ) );
 		}
-		if ( $opaque_count >= 2 || ( $server_total <= 0 && $opaque_count >= 1 && ! $recognizable_identifier ) ) {
+		if ( $opaque_count >= 2 || ( $server_total <= 0 && $opaque_count >= 1 ) ) {
 			return self::REJECT_MACHINE_TOKEN;
 		}
 
@@ -103,10 +101,20 @@ final class YSSsAnalyticsAdmission {
 		return $candidates;
 	}
 
-	private static function opaque_token_count( string $query ): int {
-		preg_match_all( '/(?<![\p{L}\p{N}])[A-Za-z0-9_-]{16,}(?![\p{L}\p{N}])/u', $query, $matches );
-		$count = 0;
-		foreach ( array_unique( $matches[0] ?? [] ) as $token ) {
+	/**
+	 * @return list<array{token:string,start:int,length:int}>
+	 */
+	private static function opaque_token_spans( string $query ): array {
+		preg_match_all(
+			'/(?<![\p{L}\p{N}])[A-Za-z0-9_-]{16,}(?![\p{L}\p{N}])/u',
+			$query,
+			$matches,
+			PREG_OFFSET_CAPTURE
+		);
+
+		$spans = [];
+		foreach ( $matches[0] ?? [] as $match ) {
+			[ $token, $start ] = $match;
 			$is_uuid = 1 === preg_match( '/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/iD', $token );
 			$is_hex  = strlen( $token ) >= 16 && 1 === preg_match( '/\A[0-9a-f]+\z/iD', $token );
 			$is_mixed_long = strlen( $token ) >= 20
@@ -118,17 +126,56 @@ final class YSSsAnalyticsAdmission {
 				&& preg_match_all( '/[aeiou]/i', $token ) <= (int) floor( strlen( $token ) * 0.2 );
 			$is_obvious_sequence = self::is_obvious_sequence( $token );
 			if ( $is_uuid || $is_hex || $is_mixed_long || $is_consonant_noise || $is_obvious_sequence ) {
-				++$count;
+				$spans[] = [
+					'token'  => $token,
+					'start'  => (int) $start,
+					'length' => strlen( $token ),
+				];
 			}
 		}
-		return $count;
+
+		return $spans;
 	}
 
-	private static function has_recognizable_identifier( string $query ): bool {
-		return 1 === preg_match(
-			'/(?:^|[^\p{L}\p{N}])(?:sku|isbn(?:-1[03])?|ean|upc|mpn|型號|料號)\s*[-:#]?\s*[A-Za-z0-9][A-Za-z0-9._-]{3,}(?=$|[^\p{L}\p{N}])/iu',
-			$query
+	/**
+	 * @return list<array{start:int,length:int}>
+	 */
+	private static function identifier_spans( string $query ): array {
+		preg_match_all(
+			'/(?:^|[^\p{L}\p{N}])((?:sku|isbn(?:-1[03])?|ean|upc|mpn|型號|料號)\s*[-:#]?\s*[A-Za-z0-9][A-Za-z0-9._-]{3,})(?=$|[^\p{L}\p{N}])/iu',
+			$query,
+			$matches,
+			PREG_OFFSET_CAPTURE
 		);
+
+		$spans = [];
+		foreach ( $matches[1] ?? [] as $match ) {
+			[ $identifier, $start ] = $match;
+			$spans[] = [
+				'start'  => (int) $start,
+				'length' => strlen( $identifier ),
+			];
+		}
+
+		return $spans;
+	}
+
+	private static function residual_opaque_count( string $query ): int {
+		$identifiers = self::identifier_spans( $query );
+		$residual    = [];
+
+		foreach ( self::opaque_token_spans( $query ) as $opaque ) {
+			$opaque_end = $opaque['start'] + $opaque['length'];
+			foreach ( $identifiers as $identifier ) {
+				$identifier_end = $identifier['start'] + $identifier['length'];
+				if ( $opaque['start'] >= $identifier['start'] && $opaque_end <= $identifier_end ) {
+					continue 2;
+				}
+			}
+			$residual[] = $opaque['token'];
+		}
+
+		return count( array_unique( $residual ) );
 	}
 
 	private static function is_obvious_sequence( string $token ): bool {

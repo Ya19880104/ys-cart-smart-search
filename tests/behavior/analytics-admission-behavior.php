@@ -66,6 +66,32 @@ ysss_test('analytics admission rejects attacks known parameters and opaque machi
     ysss_assert_same('reject_machine_token', YSSsAnalyticsAdmission::classify('qwertyuiopasdfghjklzxcvb', 0));
 });
 
+$token_local_cases = [
+    ['SKU-9F8A7B6C5D4E3F2A', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO, true],
+    ['SKU-9F8A7B6C5D4E3F2A MPN-A1B2C3D4E5F6G7H8', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO, true],
+    ['SKU-ABCD qwertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['SKU-9F8A7B6C5D4E3F2A 123e4567-e89b-12d3-a456-426614174000', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['ISBN-9781234567890 utm_source=test', 2, YSSsAnalyticsAdmission::REJECT_KNOWN_PARAMETER, false],
+    ['SKU-9F8A7B6C5D4E3F2A MPN-A1B2C3D4E5F6G7H8', 2, YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT, true],
+    ['SKU-9F8A7B6C5D4E3F2A %71wertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['ＳＫＵ－９Ｆ８Ａ７Ｂ６Ｃ５Ｄ４Ｅ３Ｆ２Ａ qwertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['SKU: qwertyuiopasdfghjklzxcvb qwertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+];
+
+foreach ($token_local_cases as $index => [$query, $total, $expected, $should_insert]) {
+    ysss_test("analytics admission keeps identifier exemption local for fixture {$index}", static function () use ($index, $query, $total, $expected, $should_insert): void {
+        ysss_assert_same($expected, YSSsAnalyticsAdmission::classify($query, $total), "Unexpected admission for fixture {$index}");
+
+        YSSsWpFake::reset();
+        YSSsQueryRepository::log($query, $total, 'products', 'bar', "identifier-span-{$index}");
+        ysss_assert_same(
+            $should_insert ? 1 : 0,
+            count($GLOBALS['wpdb']->inserts),
+            "Repository insert boundary disagreed for fixture {$index}"
+        );
+    });
+}
+
 ysss_test('analytics write bottleneck ignores machine parameters but retains human zero results', static function (): void {
     ysss_assert_true(class_exists(YSSsAnalyticsAdmission::class), 'Analytics admission SOT is missing');
 
