@@ -65,11 +65,10 @@ final class YSSsInjectionGuard {
 		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
 		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
 
-		// Stacked-query probes require a statement boundary plus an explicit SQL command word.
-		// Start/closing-parenthesis boundaries cover probes such as "); DROP TABLE" while natural product text
-		// such as "Drop Table 桌遊" remains searchable because it has no injected statement boundary.
+		// Stacked-query probes require the statement separator itself plus an explicit SQL command word.
+		// Natural product text such as "Drop Table 桌遊" remains searchable because it has no separator.
 		if ( preg_match(
-			'~(?:^|[\'"`]|\b\d+|\))\s*\){0,8}\s*;\s*(?:select|insert|replace|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|handler|load|set|show|describe|desc|explain|use|lock|unlock|begin|start|commit|rollback)\b~iu',
+			'~;\s*(?:select|insert|replace|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|handler|load|set|show|describe|desc|explain|use|lock|unlock|begin|start|commit|rollback)\b~iu',
 			$sql
 		) ) {
 			return true;

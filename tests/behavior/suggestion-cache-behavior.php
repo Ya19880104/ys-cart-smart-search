@@ -183,8 +183,12 @@ ysss_test('automatic suggestions require a current published product match even 
     ysss_assert_false(YSSsSearchService::has_product_match('stale-product'));
 });
 
-ysss_test('automatic suggestions use the filter-final visible product result', static function (): void {
+ysss_test('automatic suggestions use the complete contextual filter-final search result', static function (): void {
     ysss_suggest_reset();
+    $settings = YSSsWpFake::$options['ys_ss_settings'];
+    $settings['group_order'] = ['products', 'categories'];
+    $settings['categories'] = ['enabled' => true, 'limit' => 3, 'show_count' => false];
+    YSSsWpFake::$options['ys_ss_settings'] = $settings;
     $authorityHandler = $GLOBALS['wpdb']->getResultsHandler;
     $GLOBALS['wpdb']->getResultsHandler = static function (
         string $sql,
@@ -202,28 +206,37 @@ ysss_test('automatic suggestions use the filter-final visible product result', s
                 'image_url' => '',
             ]];
         }
+        if (str_contains($sql, 'FROM wp_ys_ec_categories')) {
+            return [[
+                'id' => 81,
+                'name' => 'Bundle Category',
+                'slug' => 'bundle-category',
+            ]];
+        }
         return null === $authorityHandler ? [] : $authorityHandler($sql, $output, $database);
     };
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = '1';
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
-        'count' => 2,
+        'count' => 1,
         'recent_enabled' => true,
-        'items' => [
-            ['term' => 'hidden-product', 'source' => 'auto'],
-            ['term' => 'visible-product', 'source' => 'auto'],
-        ],
+        'items' => [['term' => 'bundle', 'source' => 'auto']],
     ];
-    $seen = [];
-    add_filter('ys_ss_result_groups', static function (array $groups, string $norm) use (&$seen): array {
-        $seen[] = $norm;
-        return 'hidden-product' === $norm ? [] : $groups;
+    add_filter('ys_ss_result_groups', static function (array $groups): array {
+        $types = array_column($groups, 'type');
+        if (!in_array('categories', $types, true)) {
+            return $groups;
+        }
+        return array_values(array_filter(
+            $groups,
+            static fn(array $group): bool => 'products' !== ($group['type'] ?? null)
+        ));
     }, 10, 2);
 
+    $actual = YSSsSearchService::search('bundle');
+    ysss_assert_same(0, $actual['products_total'] ?? null, 'Contextual filter fixture did not remove the public product result');
+    ysss_assert_same(['categories'], array_column($actual['groups'] ?? [], 'type'), 'Contextual filter fixture lost its category condition');
     $payload = YSSsSuggestService::suggestions();
-    ysss_assert_same([
-        ['term' => 'visible-product', 'source' => 'auto'],
-    ], $payload['items'] ?? null, 'Filter-hidden product term remained in automatic suggestions');
-    ysss_assert_same(['hidden-product', 'visible-product'], $seen, 'Automatic term authority did not use both filter-final product results');
+    ysss_assert_same([], $payload['items'] ?? null, 'Automatic term ignored the complete contextual filter-final result');
 });
 
 ysss_test('suggest count zero stays disabled for cached candidates', static function (): void {

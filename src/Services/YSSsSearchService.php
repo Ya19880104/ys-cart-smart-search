@@ -118,21 +118,8 @@ final class YSSsSearchService {
 			return false;
 		}
 
-		$settings = YSSsSettings::all();
-		$cfg      = is_array( $settings['products'] ?? null ) ? $settings['products'] : [];
-		$group    = self::products_group( $norm, $cfg );
-		$groups   = ! empty( $group['items'] ) ? [ $group ] : [];
-		$groups   = self::normalize_filter_final_product_groups(
-			(array) apply_filters( 'ys_ss_result_groups', $groups, $norm )
-		);
-		foreach ( $groups as $candidate ) {
-			if ( is_array( $candidate )
-				&& 'products' === ( $candidate['type'] ?? null )
-				&& ! empty( $candidate['items'] ) ) {
-				return true;
-			}
-		}
-		return false;
+		$result = self::search( $norm );
+		return (int) ( $result['products_total'] ?? 0 ) > 0;
 	}
 
 	/**

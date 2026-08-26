@@ -62,6 +62,10 @@ return [
         'SQL stacked text closing parenthesis drop' => 'abc); DROP TABLE wp_users',
         'SQL stacked comment-separated boundary' => 'abc)/**/;/**/DROP TABLE wp_users',
         'percent encoded stacked bare boundary' => 'abc%29%3B%20DROP%20TABLE%20wp_users',
+        'SQL stacked alphabetic prefix drop' => 'abc; DROP TABLE wp_users',
+        'SQL stacked alphabetic prefix delete' => 'coat; DELETE FROM wp_users',
+        'SQL stacked alphabetic prefix select' => 'abc; SELECT user_pass FROM wp_users',
+        'percent encoded alphabetic statement boundary' => 'abc%3B%20DROP%20TABLE%20wp_users',
         'percent encoded stacked closing parenthesis' => '%27%29%3B%20DROP%20TABLE%20wp_users',
         'MySQL executable comment union' => '1 UNION /*!50000 SELECT*/ user_pass FROM wp_users',
         'MySQL executable comment with star' => '1 /*!50000 UNION SELECT * FROM wp_users*/',
@@ -93,5 +97,6 @@ return [
         'braced size label' => 'Nova Mug {Large}',
         'backtick technical title' => 'JavaScript `fetch` guide',
         'family emoji ZWJ title' => '👨‍👩‍👧‍👦 T-shirt',
+        'natural semicolon product description' => 'coat; blue size',
     ],
 ];
