@@ -8,7 +8,11 @@
 
 namespace YangSheep\SmartSearch\Frontend;
 
+use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsRateLimiter;
+use YangSheep\SmartSearch\Security\YSSsSearchInput;
+use YangSheep\SmartSearch\Services\YSSsSearchService;
 use YangSheep\SmartSearch\YSSmartSearchDetector;
 
 defined( 'ABSPATH' ) || exit;
@@ -29,6 +33,50 @@ final class YSSsShortcodes {
 
 		add_action( 'wp_enqueue_scripts', [ self::class, 'register_assets' ] );
 		add_action( 'wp_footer', [ self::class, 'print_popup' ], 5 );
+		add_action( 'template_redirect', [ self::class, 'maybe_log_list_search' ], 20 );
+	}
+
+	/**
+	 * Record a list-mode submit that navigated before the live query produced a signed receipt.
+	 * Proved client-owned submits carry a harmless marker and are not counted twice here.
+	 */
+	public static function maybe_log_list_search(): void {
+		$settings = YSSsSettings::all();
+		if ( 'list' !== ( $settings['results_mode'] ?? 'list' )
+			|| ! array_key_exists( 'ys_ec_search', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		$client_logged = $_GET['ys_ss_client_logged'] ?? ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( is_scalar( $client_logged ) && '1' === (string) wp_unslash( $client_logged ) ) {
+			return;
+		}
+
+		$raw_param = $_GET['ys_ec_search']; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( ! is_string( $raw_param ) ) {
+			return;
+		}
+		$raw   = wp_unslash( $raw_param );
+		$input = YSSsSearchInput::inspect( $raw );
+		if ( $input['blocked'] || '' === trim( $input['query'] ) ) {
+			return;
+		}
+
+		try {
+			if ( ! YSSsRateLimiter::allow( 'log', 30 ) ) {
+				return;
+			}
+			$result = YSSsSearchService::search( $input['query'] );
+			YSSsQueryRepository::log_page(
+				$input['query'],
+				$input['raw'],
+				(int) ( $result['products_total'] ?? 0 ),
+				implode( ',', (array) ( $result['content_types'] ?? [] ) ),
+				YSSsRateLimiter::visitor_hash()
+			);
+		} catch ( \Throwable $error ) {
+			// Analytics remains a side-channel and never blocks the destination page.
+		}
 	}
 
 	public static function maybe_takeover(): void {

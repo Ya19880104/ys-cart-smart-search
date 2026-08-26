@@ -74,6 +74,13 @@ class NodeStub {
 		this.children.push(child);
 		return child;
 	}
+	removeChild(child) {
+		const index = this.children.indexOf(child);
+		if (index < 0) { throw new Error('Node is not a child'); }
+		this.children.splice(index, 1);
+		child.parentNode = null;
+		return child;
+	}
 	addEventListener(type, callback) {
 		if (!this.listeners[type]) { this.listeners[type] = []; }
 		this.listeners[type].push(callback);

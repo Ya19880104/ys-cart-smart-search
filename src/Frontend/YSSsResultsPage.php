@@ -3,7 +3,7 @@
  * 獨立混合搜尋結果頁（B 模式）：短代碼 [ys_ss_search_results]。
  *
  * 商品 grid（分頁）＋分類＋文章/頁面分區，重用 YSSsSearchService::search_page()。
- * 落地此頁的搜尋於 server 端記錄（source='page'，600 秒去重）→ 與下拉一致計入分析報表。
+ * 落地此頁的搜尋於 server 端記錄（source='page'，同事件重入去重）→ 與下拉一致計入分析報表。
  * 切到 page 模式時自動供裝一個含本短代碼的頁面。
  *
  * @package YangSheep\SmartSearch

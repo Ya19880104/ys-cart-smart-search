@@ -54,6 +54,21 @@ final class YSSsInjectionGuard {
 			return true;
 		}
 
+		// MySQL executable comments can carry a real statement and must be rejected before ordinary
+		// comments are folded. Plain comments remain foldable so UNION/**/SELECT is still visible.
+		if ( preg_match( '~/\*![0-9]{0,6}\s*[^*]{0,512}\*/~iu', $scan ) ) {
+			return true;
+		}
+
+		// Stacked-query probes require both statement structure and a DDL/DML verb. This deliberately
+		// keeps natural product text such as "Drop Table 桌遊" searchable.
+		if ( preg_match(
+			'~(?:[\'"`]\s*;\s*|\b\d+\s*;\s*)(?:select|insert|update|delete|drop|alter|create|truncate)\b[^\r\n]{0,512}(?:;|--|#)(?:\s|$)~iu',
+			$scan
+		) ) {
+			return true;
+		}
+
 		// SQL comments 先折成空白，以識別 UNION/**/SELECT；不攔自然語言的 "Drop Table" 書名。
 		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
 		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;

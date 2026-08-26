@@ -615,15 +615,15 @@ ysss_test('mixed page analytics use the exact product total only', static functi
     ysss_assert_same(1, $data['has_results'] ?? null);
 });
 
-ysss_test('B page searches a noisy full ingress but excludes it from analytics', static function (): void {
+ysss_test('B page records a normal full ingress with a parameter tail', static function (): void {
     ysss_pagination_fixture(1);
     $_GET['ys_ec_search'] = str_repeat('nova ', 20) . 'utm_source=tail';
     $_GET['ys_ss_page'] = '1';
 
     $html = YSSsResultsPage::render();
 
-    ysss_assert_contains('Nova Product 1', $html, 'Full-ingress analytics policy blocked the legitimate page search');
-    ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'B page discarded the noisy tail before analytics admission');
+    ysss_assert_contains('Nova Product 1', $html, 'Full-ingress policy blocked the legitimate page search');
+    ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Normal parameter-tail search was not recorded');
 });
 
 ysss_test('B page records a recognizable long ingress but stores only its bounded canonical query', static function (): void {

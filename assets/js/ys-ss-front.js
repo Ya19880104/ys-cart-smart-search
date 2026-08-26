@@ -80,15 +80,20 @@
 		} catch (error) { /* noop */ }
 	}
 
-	/** 行為紀錄（fire-and-forget；同詞 10 分鐘去重）。 */
+	/** 行為紀錄（fire-and-forget；只對同一 signed receipt 去重）。 */
 	function logQuery(term, ingress, receipt, source) {
 		var normalized = (term || '').trim().toLowerCase();
-		if (normalized.length < 1 || typeof ingress !== 'string' || !ingress || typeof receipt !== 'string' || !receipt) { return; }
+		if (normalized.length < 1 || typeof ingress !== 'string' || !ingress || typeof receipt !== 'string' || !receipt) { return false; }
 		try {
 			var map = JSON.parse(sessionStorage.getItem(LOGGED_KEY) || '{}');
 			var now = Date.now();
-			if (map[normalized] && now - map[normalized] < 600000) { return; }
-			map[normalized] = now;
+			if (!map || 'object' !== typeof map || Array.isArray(map)) { map = {}; }
+			Object.keys(map).forEach(function (key) {
+				if (!Number.isFinite(map[key]) || now - map[key] >= 600000) { delete map[key]; }
+			});
+			var eventKey = receipt.slice(-64);
+			if (map[eventKey]) { return true; }
+			map[eventKey] = now;
 			sessionStorage.setItem(LOGGED_KEY, JSON.stringify(map));
 		} catch (error) { /* 仍嘗試送出 */ }
 
@@ -99,6 +104,23 @@
 		} else {
 			fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(function () {});
 		}
+		return true;
+	}
+
+	function markClientLogged(form) {
+		var marker = form.querySelector('input[name="ys_ss_client_logged"]');
+		if (!marker) {
+			marker = document.createElement('input');
+			marker.type = 'hidden';
+			marker.setAttribute('name', 'ys_ss_client_logged');
+			form.appendChild(marker);
+		}
+		marker.value = '1';
+	}
+
+	function clearClientLogged(form) {
+		var marker = form.querySelector('input[name="ys_ss_client_logged"]');
+		if (marker && marker.parentNode) { marker.parentNode.removeChild(marker); }
 	}
 
 	/* ───────── controller and render ───────── */
@@ -128,6 +150,7 @@
 
 	function beginInteraction(form, mode) {
 		var state = controller(form);
+		clearClientLogged(form);
 		state.generation += 1;
 		state.mode = mode;
 		clearTimeout(state.settleTimer);
@@ -479,7 +502,9 @@
 			var proof = controller(form).proof;
 			if (!proof || proof.input !== query || !proof.receipt) { return; }
 			if (proof.productsTotal > 0) { recentPush(proof.recentTerm); }
-			if (CFG.resultsMode !== 'page') { logQuery(proof.query, proof.input, proof.receipt, sourceOf(form)); }
+			if (CFG.resultsMode !== 'page' && logQuery(proof.query, proof.input, proof.receipt, sourceOf(form))) {
+				markClientLogged(form);
+			}
 		});
 
 		input.addEventListener('keydown', function (event) {

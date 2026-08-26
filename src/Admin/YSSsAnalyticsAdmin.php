@@ -66,6 +66,8 @@ final class YSSsAnalyticsAdmin {
 						<button type="button" class="ysca-btn ysca-btn--sm ysca-btn--primary" id="ys-ss-apply"><?php esc_html_e( '套用', 'ys-cart-smart-search' ); ?></button>
 					</span>
 					<a class="ysca-btn ysca-btn--sm ysca-btn--ghost" id="ys-ss-export" href="#" download><?php esc_html_e( '匯出 CSV', 'ys-cart-smart-search' ); ?></a>
+					<button type="button" class="ysca-btn ysca-btn--sm ysca-btn--outline" id="ys-ss-delete-selected" disabled><?php esc_html_e( '刪除勾選', 'ys-cart-smart-search' ); ?></button>
+					<button type="button" class="ysca-btn ysca-btn--sm ysca-btn--ghost ys-ss-danger" id="ys-ss-delete-all-analytics"><?php esc_html_e( '清除全部…', 'ys-cart-smart-search' ); ?></button>
 					<span class="ys-ss-muted" id="ys-ss-action-msg" role="status" aria-live="polite"></span>
 				</div>
 			</div>
@@ -87,13 +89,14 @@ final class YSSsAnalyticsAdmin {
 					<h2 class="ys-ss-card__title"><?php esc_html_e( '熱門關鍵字排行', 'ys-cart-smart-search' ); ?></h2>
 					<table class="ys-ss-table">
 						<thead><tr>
+							<th class="ys-ss-select-col"><span class="screen-reader-text"><?php esc_html_e( '選取', 'ys-cart-smart-search' ); ?></span></th>
 							<th>#</th>
 							<th><?php esc_html_e( '關鍵字', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"><?php esc_html_e( '次數', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"><?php esc_html_e( '零結果', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"></th>
 						</tr></thead>
-						<tbody id="ys-ss-top-body"><tr><td colspan="5"><?php esc_html_e( '載入中…', 'ys-cart-smart-search' ); ?></td></tr></tbody>
+						<tbody id="ys-ss-top-body"><tr><td colspan="6"><?php esc_html_e( '載入中…', 'ys-cart-smart-search' ); ?></td></tr></tbody>
 					</table>
 				</div>
 
@@ -102,13 +105,14 @@ final class YSSsAnalyticsAdmin {
 					<p class="ys-ss-muted"><?php esc_html_e( '顧客搜了但找不到的詞：考慮補貨、調整商品命名或設定同義關鍵字。', 'ys-cart-smart-search' ); ?></p>
 					<table class="ys-ss-table">
 						<thead><tr>
+							<th class="ys-ss-select-col"><span class="screen-reader-text"><?php esc_html_e( '選取', 'ys-cart-smart-search' ); ?></span></th>
 							<th>#</th>
 							<th><?php esc_html_e( '關鍵字', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"><?php esc_html_e( '零結果', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"><?php esc_html_e( '總次數', 'ys-cart-smart-search' ); ?></th>
 							<th class="ys-ss-w90"></th>
 						</tr></thead>
-						<tbody id="ys-ss-zero-body"><tr><td colspan="5"><?php esc_html_e( '載入中…', 'ys-cart-smart-search' ); ?></td></tr></tbody>
+						<tbody id="ys-ss-zero-body"><tr><td colspan="6"><?php esc_html_e( '載入中…', 'ys-cart-smart-search' ); ?></td></tr></tbody>
 					</table>
 				</div>
 			</div>

@@ -97,6 +97,54 @@ ysss_test('exact term route preserves REST-ready bytes without lossy sanitation'
     ysss_assert_contains("c:\\docs\\<vector>", $deleteSql, 'Exact term bytes were altered before prepared DELETE');
 });
 
+ysss_test('batch term route is bounded exact and rejects malformed input before database work', static function (): void {
+    $controller = new YSSsAdminController();
+    foreach ([
+        [],
+        ['terms' => 'nova'],
+        ['terms' => []],
+        ['terms' => ['nova', ['nested']]],
+        ['terms' => array_fill(0, 101, 'nova')],
+    ] as $params) {
+        YSSsWpFake::reset();
+        $result = $controller->delete_terms(new WP_REST_Request($params));
+        ysss_assert_true($result instanceof WP_Error);
+        ysss_assert_same(400, $result->get_error_data()['status'] ?? null);
+        ysss_assert_same([], $GLOBALS['wpdb']->queries, 'Malformed batch delete reached the database');
+    }
+});
+
+ysss_test('batch delete prepares unique exact terms in one transaction and invalidates once', static function (): void {
+    YSSsWpFake::reset();
+    $GLOBALS['wpdb']->queryHandler = static function (string $sql): int|false {
+        if (str_starts_with($sql, 'DELETE FROM wp_ys_ss_queries')) {
+            return 3;
+        }
+        if (str_starts_with($sql, 'DELETE FROM wp_ys_ss_terms_daily')) {
+            return 2;
+        }
+        return 1;
+    };
+    $controller = new YSSsAdminController();
+    $result = $controller->delete_terms(new WP_REST_Request([
+        'terms' => ['C:\\Docs\\<vector>', "x') OR 1=1 --", 'C:\\Docs\\<vector>'],
+    ]));
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(5, $result->get_data()['deleted']['total'] ?? null);
+    $deleteSql = implode("\n", array_filter(
+        $GLOBALS['wpdb']->queries,
+        static fn(string $sql): bool => str_starts_with($sql, 'DELETE FROM wp_ys_ss_')
+    ));
+    ysss_assert_contains("c:\\docs\\<vector>", $deleteSql, 'Batch delete altered technical term bytes');
+    ysss_assert_contains("x'') or 1=1 --", strtolower($deleteSql), 'Batch delete did not bind the quote-bearing term as a prepared value');
+    ysss_assert_same(2, substr_count(strtolower($deleteSql), "c:\\docs\\<vector>"), 'Duplicate terms were not normalized before both table deletes');
+    $generationUpdates = array_values(array_filter(
+        YSSsWpFake::$optionUpdates,
+        static fn(array $update): bool => 'ys_ss_suggest_cache_generation' === $update['key']
+    ));
+    ysss_assert_same(1, count($generationUpdates), 'Batch delete did not invalidate suggestions exactly once');
+});
+
 ysss_test('exact delete lock failure returns a sanitized admin error', static function (): void {
     YSSsWpFake::reset();
     $GLOBALS['wpdb']->last_error = 'SECRET SQL backend detail';

@@ -90,7 +90,7 @@ ysss_test('v2 receipt binds exact ingress without exposing it in payload claims'
     ysss_assert_same(null, YSSsLogReceipt::verify_bound($receipt, 'nova exact path', $raw . 'x', 'visitor-12345678', 1787702370));
     ysss_assert_same(null, YSSsLogReceipt::verify_bound($receipt, 'nova exact path', strtolower($raw), 'visitor-12345678', 1787702370));
     $wire = $receiptClaims($receipt);
-    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'iat', 'exp'], array_keys($wire));
+    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'eid', 'iat', 'exp'], array_keys($wire));
     ysss_assert_false(str_contains((string) json_encode($wire), $raw), 'Receipt payload exposed exact ingress');
     foreach (['raw', 'ingress', 'digest', 'hash', 'admitted', 'reason'] as $forbidden) {
         ysss_assert_false(array_key_exists($forbidden, $wire), "Receipt payload exposed {$forbidden}");
@@ -312,7 +312,7 @@ ysss_test('category and post only query keeps display total but signs zero produ
     $receipt = (string) ($data['log_receipt'] ?? '');
     $visitor = YSSsRateLimiter::visitor_hash();
     ysss_assert_same(0, YSSsLogReceipt::verify_bound($receipt, 'nova', 'Nova', $visitor)['total'] ?? null, 'Aggregate display total was signed as product authority');
-    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'iat', 'exp'], array_keys($receiptClaims($receipt)), 'Receipt v2 wire keys changed');
+    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'eid', 'iat', 'exp'], array_keys($receiptClaims($receipt)), 'Receipt v2 wire keys changed');
     ysss_assert_same(0, $data['products_total'] ?? null, 'Category/post-only results gained product authority');
 
     $logged = $controller->log(new WP_REST_Request([
@@ -688,6 +688,34 @@ ysss_test('log ignores client total and stores signed server total', static func
     ysss_assert_same('products', $data['content_types'] ?? null);
 });
 
+ysss_test('fresh same-term searches in one second receive distinct replay identities', static function (): void {
+    YSSsWpFake::reset();
+    $now = 1787750000;
+    $visitor = YSSsRateLimiter::visitor_hash_at($now);
+    $firstReceipt = YSSsLogReceipt::issue_for_request('nova', 2, 'products', $visitor, 'nova', $now);
+    $secondReceipt = YSSsLogReceipt::issue_for_request('nova', 2, 'products', $visitor, 'nova', $now);
+    ysss_assert_false($firstReceipt === $secondReceipt, 'Two completed query events reused one receipt identity');
+
+    $GLOBALS['ysss_receipt_security_now'] = $now;
+    try {
+        foreach ([$firstReceipt, $secondReceipt] as $receipt) {
+            $response = (new YSSsPublicController())->log(new WP_REST_Request([
+                'q' => 'nova',
+                'ingress' => 'nova',
+                'receipt' => $receipt,
+                'source' => 'bar',
+            ]));
+            ysss_assert_same(['ok' => true], $response->get_data());
+        }
+    } finally {
+        unset($GLOBALS['ysss_receipt_security_now']);
+    }
+
+    ysss_assert_same(2, count($GLOBALS['wpdb']->inserts), 'A fresh same-term search event was deduplicated');
+    $eventHashes = array_column(array_column($GLOBALS['wpdb']->inserts, 'data'), 'visitor_hash');
+    ysss_assert_same(2, count(array_unique($eventHashes)), 'Fresh receipts reused the repository event identity');
+});
+
 ysss_test('log controller replays a v2 receipt across UTC midnight with one repository dedupe identity', static function () use ($issueAt, $verifyAt, $issueVisitor, $verifyDayVisitor): void {
     YSSsWpFake::reset();
     ysss_assert_false($issueVisitor === $verifyDayVisitor, 'Cross-midnight identities unexpectedly match');
@@ -732,15 +760,16 @@ ysss_test('log controller replays a v2 receipt across UTC midnight with one repo
     ysss_assert_same(['ok' => true], $first->get_data());
     ysss_assert_same(['ok' => true], $second->get_data());
     ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Cross-midnight replay bypassed repository dedupe');
-    ysss_assert_same($issueVisitor, $GLOBALS['wpdb']->inserts[0]['data']['visitor_hash'] ?? null, 'Repository received verification-day identity instead of the signed issue-day identity');
+    $eventIdentity = substr(hash_hmac('sha256', "ys-ss-receipt-event\0" . $receipt, wp_salt('nonce')), 0, 16);
+    ysss_assert_same($eventIdentity, $GLOBALS['wpdb']->inserts[0]['data']['visitor_hash'] ?? null, 'Repository did not retain one replay identity for the signed receipt');
     ysss_assert_same(2, count($dedupeSql), 'Both replay attempts did not reach the real repository dedupe check');
     ysss_assert_same([$issueAt, $verifyAt], $dedupeClockPhases, 'Repository was not reached once before and once after UTC midnight');
     ysss_assert_same(2, $securityTimeCalls, 'Each log verification did not capture exactly one phase clock');
     $wrongIdentitySql = array_values(array_filter(
         $dedupeSql,
-        static fn(string $sql): bool => !str_contains($sql, "visitor_hash = '{$issueVisitor}'")
+        static fn(string $sql): bool => !str_contains($sql, "visitor_hash = '{$eventIdentity}'")
     ));
-    ysss_assert_same([], $wrongIdentitySql, 'Repository dedupe queries did not consistently use the signed issue-day identity');
+    ysss_assert_same([], $wrongIdentitySql, 'Repository dedupe queries did not consistently use the receipt event identity');
 });
 
 ysss_test('invalid or expired receipts perform zero insert with the same response shape', static function () use ($signedFixture): void {
@@ -826,7 +855,7 @@ ysss_test('concurrent receipt replay is serialized before dedupe and insert', st
     ysss_assert_true((bool) array_filter($GLOBALS['wpdb']->queries, static fn(string $sql): bool => str_contains($sql, 'GET_LOCK')), 'No atomic serialization lock was attempted');
 });
 
-ysss_test('full ingress tails remain bound through query receipt and analytics admission', static function (): void {
+ysss_test('normal full ingress tails remain bound and recorded', static function (): void {
     $prefix = str_repeat('nova ', 20);
     $cases = [
         'known parameter' => $prefix . 'utm_source=tail',
@@ -848,7 +877,7 @@ ysss_test('full ingress tails remain bound through query receipt and analytics a
         $data = $response->get_data();
         ysss_assert_same(1, $data['products_total'] ?? null, "{$label} stopped the legitimate content search");
         ysss_assert_true(is_string($data['log_receipt'] ?? null) && '' !== $data['log_receipt'], "{$label} changed the safe-search receipt shape");
-        ysss_assert_same('', $data['recent_term'] ?? null, "{$label} received browser-memory authority");
+        ysss_assert_true(is_string($data['recent_term'] ?? null) && '' !== $data['recent_term'], "{$label} lost positive-product recent-search authority");
 
         $logged = $controller->log(new WP_REST_Request([
             'q' => (string) ($data['q'] ?? ''),
@@ -857,7 +886,7 @@ ysss_test('full ingress tails remain bound through query receipt and analytics a
             'source' => 'bar',
         ]));
         ysss_assert_same(['ok' => true], $logged->get_data());
-        ysss_assert_same([], $GLOBALS['wpdb']->inserts, "{$label} tail was lost before analytics admission");
+        ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), "{$label} normal search was not recorded");
     }
 });
 

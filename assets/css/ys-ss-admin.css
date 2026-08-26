@@ -212,6 +212,11 @@
 /* 報表 tab 內：與分頁標籤留白 */
 .ysca-page-root--reports .ys-ss-analytics-wrap { margin-top: 16px; }
 
+.ys-ss-select-col {
+	width: 34px;
+	text-align: center;
+}
+
 .ys-ss-twocol {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));

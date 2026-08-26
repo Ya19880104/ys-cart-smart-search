@@ -116,6 +116,8 @@ function makeAnalyticsFixture(ids) {
 		['ys-ss-zero-body', 'tbody'],
 		['ys-ss-apply', 'button'],
 		['ys-ss-action-msg', 'div'],
+		['ys-ss-delete-selected', 'button'],
+		['ys-ss-delete-all-analytics', 'button'],
 	].forEach(([id, tag]) => ids.set(id, new NodeStub(tag)));
 }
 

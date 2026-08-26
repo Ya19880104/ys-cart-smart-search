@@ -48,6 +48,11 @@ final class YSSsLogReceipt {
 		if ( '' === $query || '' === $visitor_hash || ! self::valid_raw( $raw ) ) {
 			return '';
 		}
+		try {
+			$event_id = bin2hex( random_bytes( 8 ) );
+		} catch ( \Throwable $error ) {
+			return '';
+		}
 
 		$claims = [
 			'v'   => self::VERSION,
@@ -55,6 +60,7 @@ final class YSSsLogReceipt {
 			't'   => max( 0, min( self::MAX_TOTAL, $total ) ),
 			'c'   => self::normalize_content_types( $content_types ),
 			'vh'  => $visitor_hash,
+			'eid' => $event_id,
 			'iat' => $now,
 			'exp' => $now + self::TTL_SECONDS,
 		];
@@ -156,7 +162,9 @@ final class YSSsLogReceipt {
 
 		$version = $claims['v'];
 		if ( self::VERSION === $version ) {
-			if ( ! self::valid_raw( $raw ) ) {
+			if ( ! self::valid_raw( $raw )
+				|| ! is_string( $claims['eid'] ?? null )
+				|| 1 !== preg_match( '/\A[a-f0-9]{16}\z/D', $claims['eid'] ) ) {
 				return null;
 			}
 			$signature_input = self::signature_input( $payload, $raw );

@@ -4,6 +4,16 @@
 
 ### Changed / Fixed
 
+- 惡意字串判定補上高訊號 stacked SQL statement 與 MySQL executable comment；被攔截字串不搜尋、
+  不寫分析。分析入口不再另猜 tracking parameter、UUID 或型號是否像機器流量；除惡意／空值外的
+  正常搜尋（含零結果與重複同詞事件）均保留。
+- 每次 `/query` 簽發帶一次性事件 ID 的短效 receipt；同一 receipt 重播仍在 repository 去重，
+  同一秒內新的同詞搜尋則分別計數。A/list 模式在 receipt 產生前快速送出時，由目的頁以實際商品
+  查詢補記；已有 client proof 的送出以 hidden marker 避免雙寫。
+- 自動顯示的熱門／外部候選在最終輸出前確認目前仍有至少一筆公開且未排除的商品；手動關鍵字
+  維持人工管理語意，不強制商品命中。
+- 搜尋分析加入列勾選、最多 100 詞的批次精確刪除，以及分析頁一鍵清除全部；所有 mutation 沿用
+  既有 capability、`wp_rest` nonce、maintenance lock、prepared SQL 與 transaction 邊界。
 - 每個前台搜尋表單改由單一互動狀態管理競態、取消、載入、錯誤與結果；chip 滑鼠／鍵盤操作只
   啟動一次有效搜尋，blocked-neutral 不再載入次要建議，合法零結果也不會被 fallback 失敗推翻。
   過期或失敗回應不再留下舊結果、proof、最近搜尋或錯誤分析事件。
@@ -25,10 +35,9 @@
   讀寫前先取得額度；額度耗盡或權威不明時顯示固定稍後再試狀態且不執行搜尋。Client identity 使用 site-keyed HMAC，IPv6
   privacy address 依 /64 聚合。每日 cron 以 completion-aware bounded multi-batch current-value
   DELETE 獨立清理 canonical 過期列；滿額 backlog 不假報完成，也不會用舊名單刪掉剛刷新 counter。
-- 分析的 SKU／ISBN／EAN／UPC／MPN／型號／料號辨識改為 token-local byte span；只豁免完整位於
-  識別片段內的 token。搜尋與分析共用有界固定點 canonical closure；無 intl 時涵蓋 fullwidth、
-  Mathematical Latin（含 dotless i/j）／digits 與明列 Letterlike ASCII subset，有 intl 時另加 NFKC。閉包未完成即
-  fail closed，旁邊無關的亂數或已知參數仍會被分析入口忽略。
+- 搜尋與分析共用有界固定點 canonical closure；無 intl 時涵蓋 fullwidth、Mathematical Latin
+  （含 dotless i/j）／digits 與明列 Letterlike ASCII subset，有 intl 時另加 NFKC。閉包未完成即
+  fail closed；通過共用惡意字串 gate 的正常參數、UUID、SKU 與型號都會如實進入分析。
 - 熱門建議失效加入 generation tombstone，並以一次未經 option cache 的資料庫快照共同判定目前
   generation 與 captured-generation marker；命中與發布前後都重驗，資料庫結果錯誤／模糊時
   fail closed，晚到的舊 generation 寫入會移除。已提交的後台變更仍以固定警示如實標示 cache
@@ -36,7 +45,8 @@
 - 分析 receipt 的訪客身分改綁簽發時間；跨 UTC 午夜但仍在有效期內的同一 receipt 維持同一
   去重身分。公開 wire 升為 v2：HMAC 以 domain-separated、length-delimited 形式綁定完整且未截斷的
   搜尋 ingress，但 payload 不含原字串、digest、admission verdict 或拒絕原因。`/log` 需同時驗證
-  canonical query 與 exact ingress；query-only v1 receipt 在公開寫入面固定中性拒絕。
+  canonical query 與 exact ingress；一次性事件 ID 讓新搜尋與重播可被區分，query-only v1 receipt
+  在公開寫入面固定中性拒絕。
 - 最近搜尋、自動熱門詞與 B 模式分析只以實際商品數為正向依據；filter-final 商品必須至少有
   一筆具可見 title 與安全 URL 的可渲染項目才可授權商品總數，空白／畸形項目不會進入正向 receipt 或
   搜尋記憶。最近搜尋改只接受伺服器依完整 ingress 與商品正向結果核准的 bounded term，寫入新的

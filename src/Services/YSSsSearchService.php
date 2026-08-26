@@ -107,6 +107,29 @@ final class YSSsSearchService {
 	}
 
 	/**
+	 * Whether the term currently matches at least one published, non-excluded product.
+	 *
+	 * Automatic suggestions call this bounded existence query at their final output boundary so
+	 * historical rows, stale cache, or filters cannot display a zero-product automatic term.
+	 */
+	public static function has_product_match( string $q ): bool {
+		global $wpdb;
+
+		$norm = YSSsQueryRepository::normalize( $q );
+		if ( '' === $norm ) {
+			return false;
+		}
+
+		$settings = YSSsSettings::all();
+		$cfg      = is_array( $settings['products'] ?? null ) ? $settings['products'] : [];
+		[ $where, $where_args ] = self::build_products_where( $norm, $cfg );
+		$table = $wpdb->prefix . 'ys_ec_products';
+		$sql   = "SELECT 1 FROM {$table} WHERE status = 'publish' AND {$where} LIMIT 1";
+
+		return 1 === (int) $wpdb->get_var( $wpdb->prepare( $sql, $where_args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
+	/**
 	 * 結果頁（B 模式）：商品分頁 + 分類/文章（僅第一頁顯示，因通常筆數少）。
 	 *
 	 * @return array<string,mixed> { q, products_total, page, per_page, total_pages, groups[], content_types[] }

@@ -363,7 +363,8 @@ final class YSSsSuggestService {
 			$norm      = YSSsQueryRepository::normalize( $input['query'] );
 			$is_manual = 'manual' === $source;
 			if ( $input['blocked'] || '' === $norm || isset( $seen[ $norm ] )
-				|| ( ! $is_manual && ! YSSsAnalyticsAdmission::should_record( $term, 1 ) ) ) {
+				|| ( ! $is_manual && ( ! YSSsAnalyticsAdmission::should_record( $term, 1 )
+					|| ! YSSsSearchService::has_product_match( $input['query'] ) ) ) ) {
 				continue;
 			}
 			$seen[ $norm ] = true;

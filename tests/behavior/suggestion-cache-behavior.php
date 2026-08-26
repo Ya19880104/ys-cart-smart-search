@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Api\YSSsPublicController;
+use YangSheep\SmartSearch\Services\YSSsSearchService;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
 foreach ([
@@ -13,6 +14,7 @@ foreach ([
     'src/Database/YSSsSettings.php',
     'src/Database/YSSsQueryRepository.php',
     'src/Database/YSSsKeywordRepository.php',
+    'src/Services/YSSsSearchService.php',
     'src/Services/YSSsSuggestService.php',
     'src/Api/YSSsPublicController.php',
 ] as $source) {
@@ -49,6 +51,15 @@ function ysss_suggest_reset(): void
 {
     \YSSsWpFake::reset();
     $GLOBALS['ysss_suggest_authority_queries'] = [];
+    $GLOBALS['wpdb']->getVarHandler = static function (string $query): int {
+        if (str_contains($query, 'GET_LOCK') || str_contains($query, 'RELEASE_LOCK')) {
+            return 1;
+        }
+        return str_contains($query, 'SELECT 1')
+            && str_contains($query, 'FROM wp_ys_ec_products')
+            ? 1
+            : 0;
+    };
     ysss_suggest_set_authority_rows(static function (string $query): array {
         preg_match_all(
             "/'(ys_ss_(?:suggest_cache_generation|suggest_tombstone_[a-f0-9]{64}))'/i",
@@ -100,8 +111,8 @@ ysss_test('cached suggestions pass through the final raw-input filter', static f
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = $unsafe;
     $payload = YSSsSuggestService::suggestions();
     ysss_assert_same([
+        ['term' => 'utm_source=bot', 'source' => 'auto'],
         ['term' => 'utm_source=curated', 'source' => 'manual'],
-        ['term' => 'nova', 'source' => 'auto'],
     ], $payload['items'] ?? null);
 });
 
@@ -116,6 +127,33 @@ ysss_test('external suggestion filter cannot reintroduce blocked output', static
     ysss_assert_same([
         ['term' => '羊毛外套', 'source' => 'external'],
     ], $payload['items'] ?? null);
+});
+
+ysss_test('automatic suggestions require a current published product match even from cache or filters', static function (): void {
+    ysss_suggest_reset();
+    $GLOBALS['wpdb']->getVarHandler = static function (string $sql): int {
+        if (str_contains($sql, 'FROM wp_ys_ec_products') && str_contains($sql, 'live-product')) {
+            return 1;
+        }
+        return 0;
+    };
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = '1';
+    YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
+        'count' => 3,
+        'recent_enabled' => true,
+        'items' => [
+            ['term' => 'stale-product', 'source' => 'auto'],
+            ['term' => 'live-product', 'source' => 'auto'],
+            ['term' => 'manual-curated', 'source' => 'manual'],
+        ],
+    ];
+    $payload = YSSsSuggestService::suggestions();
+    ysss_assert_same([
+        ['term' => 'live-product', 'source' => 'auto'],
+        ['term' => 'manual-curated', 'source' => 'manual'],
+    ], $payload['items'] ?? null);
+    ysss_assert_true(YSSsSearchService::has_product_match('live-product'));
+    ysss_assert_false(YSSsSearchService::has_product_match('stale-product'));
 });
 
 ysss_test('suggest count zero stays disabled for cached candidates', static function (): void {

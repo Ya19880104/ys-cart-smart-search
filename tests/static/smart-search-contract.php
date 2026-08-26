@@ -93,8 +93,8 @@ $check('C8 addon 5 rules (core ns / no admin-ajax / no top menu / YSAdminApp / y
     && str_contains($settingsA, 'YSAdminApp::open')
     && str_contains($settingsA, 'ysca-btn'));
 
-// C9 安全：公開端點限流、log sanitize + 長度限制、admin nonce+capability、簽發日 receipt 身分（無 PII）
-$check('C9 security (rate limits / sanitized log / admin nonce+cap / signed issue-day identity)',
+// C9 安全：公開端點限流、raw-input gate、admin nonce+capability、簽發日驗證與 opaque event identity。
+$check('C9 security (rate limits / raw log gate / admin nonce+cap / signed receipt event)',
     str_contains($pubCtrl, 'allow_public_query()')
     && str_contains($pubCtrl, "allow( 'log', 30 )")
     && str_contains($pubCtrl, 'YSSsSearchInput::inspect')
@@ -112,7 +112,7 @@ $check('C9 security (rate limits / sanitized log / admin nonce+cap / signed issu
     && str_contains($receipt, 'function verify_for_request')
     && str_contains($receipt, "visitor_hash_at( \$claims['iat'] )")
     && str_contains($pubCtrl, 'YSSsLogReceipt::verify_for_request')
-    && str_contains($pubCtrl, "\$claims['visitor_hash']"));
+    && str_contains($pubCtrl, 'ys-ss-receipt-event'));
 
 // C10 分析旁路：log 失敗不擲回前台、cron 例外吞掉
 $check('C10 analytics is a side-channel (log failures swallowed, cron guarded)',
@@ -221,8 +221,8 @@ $check('C22 v1.4.x rename + old-core fallback + ensure_page cap-guard + search_p
     && str_contains($search, 'ys_ss_sp_') && str_contains($search, 'set_transient') && str_contains($search, 'MINUTE_IN_SECONDS')
     && version_compare($vh[1] ?? '0', '1.4.2', '>=') && str_contains($log, '## [1.4.2]'));
 
-// C23：B 模式 view_all 落點集中 mode-aware（P1）+ 分析寫入 600 秒去重下沉至 log()（P2）
-$check('C23 v1.4.3 view_all mode-aware helper + write-path dedupe centralized in log()',
+// C23：B 模式 view_all 落點集中 mode-aware（P1）+ 分析事件重播去重位於唯一寫入瓶頸（P2）
+$check('C23 view_all mode-aware helper + exact-event replay dedupe centralized in log()',
     // P1：view_all 改用 YSSsResultsPage::search_url（非直接 shop_url）；helper 為 mode-aware
     preg_match("/'view_all'\\s*=>\\s*YSSsResultsPage::search_url\\(/", $search)
     && str_contains($results, 'function search_url')
@@ -231,9 +231,11 @@ $check('C23 v1.4.3 view_all mode-aware helper + write-path dedupe centralized in
     && str_contains($results, 'self::page_url()')
     // 前端「查看全部」用 data.view_all（修 server 端 view_all 即修下拉連結）
     && str_contains($frontJs, 'data.view_all')
-    // P2：600 秒去重位於 log()（唯一寫入瓶頸）、queries 去重 SELECT 僅一處（log_page 委派）
+    // P2：exact event 去重位於 log()（唯一寫入瓶頸）；page 與 receipt 各建立事件身分。
     && substr_count($queryRepo, 'created_at >= %s AND visitor_hash = %s') === 1
-    && str_contains($queryRepo, "self::log( \$query, \$admission_ingress, \$results_total, \$content_types, 'page', \$visitor_hash )")
+    && str_contains($queryRepo, 'string $event_hash')
+    && str_contains($queryRepo, 'ys-ss-page-event')
+    && str_contains($pubCtrl, 'ys-ss-receipt-event')
     // 版本
     && version_compare($vh[1] ?? '0', '1.4.3', '>=') && str_contains($log, '## [1.4.3]'));
 
@@ -270,6 +272,7 @@ $check('C24 v1.5.2 raw-first guard: centralized ingress + A/B/REST closure + sug
 $adminJs = $read('assets/js/ys-ss-admin.js');
 $check('C25 v1.5.2 safe admin cleanup: atomic exact delete + retired heuristic purge + full clear',
 	str_contains($queryRepo, 'function delete_term')
+	&& str_contains($queryRepo, 'function delete_terms')
 	&& ! str_contains($queryRepo, 'function purge_injection')
 	&& ! str_contains($queryRepo, 'TRUNCATE TABLE')
 	&& str_contains($queryRepo, 'START TRANSACTION')
@@ -282,7 +285,9 @@ $check('C25 v1.5.2 safe admin cleanup: atomic exact delete + retired heuristic p
 	&& str_contains($queryRepo, 'information_schema.TABLES')
 	&& str_contains($queryRepo, 'function purge_all')
     && str_contains($admCtrl, "\$base . '/term'")
+    && str_contains($admCtrl, "\$base . '/terms'")
     && str_contains($admCtrl, 'function delete_term')
+	&& str_contains($admCtrl, 'function delete_terms')
     && str_contains($admCtrl, "'injection' === \$mode")
     && str_contains($admCtrl, 'ys_ss_preview_required')
     && str_contains($admCtrl, 'WP_REST_Server::DELETABLE')
@@ -290,6 +295,9 @@ $check('C25 v1.5.2 safe admin cleanup: atomic exact delete + retired heuristic p
 	&& ! str_contains($analytics, 'ys-ss-purge-injection')
 	&& str_contains($analytics, 'ys-ss-action-msg')
 	&& str_contains($adminJs, 'deleteTerm')
+	&& str_contains($analytics, 'ys-ss-delete-selected')
+	&& str_contains($analytics, 'ys-ss-delete-all-analytics')
+	&& str_contains($adminJs, "api('/terms'")
 	&& str_contains($adminJs, 'ys-ss-action-msg')
 	&& str_contains($adminJs, "method: 'DELETE'")
 	&& str_contains($adminJs, '清理失敗，請稍後再試。')
@@ -321,6 +329,7 @@ $check('C29 v1.5.3 fix-5 full-ingress analytics + shared public query authority'
     && str_contains($pubCtrl, 'allow_public_query()')
     && str_contains($results, 'allow_public_query()')
     && str_contains($receipt, 'ys-ss-log-receipt-v2')
+	&& str_contains($receipt, "'eid'")
     && str_contains($receipt, 'signature_input( $payload, $raw )')
     && str_contains($receipt, 'verified_claims( $receipt, $query, $raw, $now, false )')
     && str_contains($pubCtrl, "\$request->get_param( 'ingress' )")
@@ -330,6 +339,14 @@ $check('C29 v1.5.3 fix-5 full-ingress analytics + shared public query authority'
     && str_contains($frontJs, "ysss_recent_v2")
     && str_contains($frontJs, 'ingress: ingress')
     && ! str_contains($frontJs, "var RECENT_KEY = 'ysss_recent';"));
+
+$check('C30 original-scope analytics, current-product suggestions, and list fallback',
+	str_contains($admission, 'YSSsSearchInput::inspect')
+	&& ! str_contains($admission, 'utm_')
+	&& str_contains($search, 'function has_product_match')
+	&& str_contains($suggest, 'YSSsSearchService::has_product_match')
+	&& str_contains($short, 'function maybe_log_list_search')
+	&& str_contains($frontJs, 'ys_ss_client_logged'));
 
 echo "\nv1.5.3 contract: PASS={$pass} FAIL={$fail}\n";
 if ($fail > 0) {

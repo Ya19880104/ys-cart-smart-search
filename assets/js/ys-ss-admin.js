@@ -368,6 +368,37 @@
 
 		var curFrom = '';
 		var curTo = '';
+		var selectedTerms = new Set();
+		var selectionBoxes = [];
+		var deleteSelectedBtn = document.getElementById('ys-ss-delete-selected');
+		var deleteAllAnalyticsBtn = document.getElementById('ys-ss-delete-all-analytics');
+
+		function updateSelectionControls() {
+			deleteSelectedBtn.disabled = 0 === selectedTerms.size;
+		}
+
+		function resetSelections() {
+			selectedTerms.clear();
+			selectionBoxes = [];
+			updateSelectionControls();
+		}
+
+		function selectionCheckbox(term) {
+			var box = document.createElement('input');
+			box.type = 'checkbox';
+			box.setAttribute('aria-label', '選取 ' + term);
+			box._ysSsTerm = term;
+			box.addEventListener('change', function () {
+				if (box.checked) { selectedTerms.add(term); }
+				else { selectedTerms.delete(term); }
+				selectionBoxes.forEach(function (candidate) {
+					if (candidate._ysSsTerm === term) { candidate.checked = selectedTerms.has(term); }
+				});
+				updateSelectionControls();
+			});
+			selectionBoxes.push(box);
+			return box;
+		}
 
 		function load(from, to) {
 			curFrom = from;
@@ -379,6 +410,7 @@
 				CFG.restUrl + '/admin/smart-search/export?from=' + from + '&to=' + to + '&_wpnonce=' + CFG.nonce;
 
 			api('/overview?from=' + from + '&to=' + to).then(function (d) {
+				resetSelections();
 				document.getElementById('ys-ss-kpi-total').textContent = Number(d.kpi.total).toLocaleString();
 				document.getElementById('ys-ss-kpi-unique').textContent = Number(d.kpi.unique).toLocaleString();
 				document.getElementById('ys-ss-kpi-zero').textContent = Number(d.kpi.zero).toLocaleString();
@@ -452,7 +484,7 @@
 			if (!rows.length) {
 				var tr0 = document.createElement('tr');
 				var td0 = document.createElement('td');
-				td0.colSpan = 5;
+				td0.colSpan = 6;
 				td0.textContent = '期間內無資料。';
 				tr0.appendChild(td0);
 				body.appendChild(tr0);
@@ -460,6 +492,10 @@
 			}
 			rows.forEach(function (r, i) {
 				var tr = document.createElement('tr');
+				var tdSelect = document.createElement('td');
+				tdSelect.className = 'ys-ss-select-col';
+				tdSelect.appendChild(selectionCheckbox(r.term));
+				tr.appendChild(tdSelect);
 				[i + 1, r.term, r.hits, r.zero_hits].forEach(function (v) {
 					var td = document.createElement('td');
 					td.textContent = String(v);
@@ -497,7 +533,7 @@
 			if (!rows.length) {
 				var tr0 = document.createElement('tr');
 				var td0 = document.createElement('td');
-				td0.colSpan = 5;
+				td0.colSpan = 6;
 				td0.textContent = '期間內沒有零結果搜尋 🎉';
 				tr0.appendChild(td0);
 				body.appendChild(tr0);
@@ -505,6 +541,10 @@
 			}
 			rows.forEach(function (r, i) {
 				var tr = document.createElement('tr');
+				var tdSelect = document.createElement('td');
+				tdSelect.className = 'ys-ss-select-col';
+				tdSelect.appendChild(selectionCheckbox(r.term));
+				tr.appendChild(tdSelect);
 				[i + 1, r.term, r.zero_hits, r.hits].forEach(function (v) {
 					var td = document.createElement('td');
 					td.textContent = String(v);
@@ -517,6 +557,53 @@
 				body.appendChild(tr);
 			});
 		}
+
+		deleteSelectedBtn.addEventListener('click', function () {
+			var terms = Array.from(selectedTerms);
+			if (!terms.length) { return; }
+			if (!window.confirm('刪除勾選的 ' + terms.length + ' 個關鍵字及其全部搜尋紀錄？此操作無法復原。')) { return; }
+			deleteSelectedBtn.disabled = true;
+			deleteAllAnalyticsBtn.disabled = true;
+			showActionMessage('刪除中…');
+			api('/terms', { method: 'DELETE', body: JSON.stringify({ terms: terms }) })
+				.then(function (d) {
+					var total = parseInt(d && d.deleted && d.deleted.total, 10);
+					if (!Number.isFinite(total) || total < 0) { total = 0; }
+					showActionMessage(messageWithCacheStatus('已刪除 ' + total + ' 筆搜尋紀錄。', d), 4000);
+					load(curFrom, curTo);
+				})
+				.catch(function (e) {
+					showActionMessage(e && 'ys_ss_analytics_busy' === e.code
+						? '搜尋分析正在更新，請稍後再試。'
+						: '批次刪除失敗，請稍後再試。');
+				})
+				.finally(function () {
+					deleteAllAnalyticsBtn.disabled = false;
+					updateSelectionControls();
+				});
+		});
+
+		deleteAllAnalyticsBtn.addEventListener('click', function () {
+			var code = window.prompt('此操作將刪除全部搜尋分析資料且無法復原。\n請輸入 DELETE 確認：');
+			if ('DELETE' !== (code || '').trim()) { return; }
+			deleteSelectedBtn.disabled = true;
+			deleteAllAnalyticsBtn.disabled = true;
+			showActionMessage('清理中…');
+			api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'all', confirm: 'DELETE' }) })
+				.then(function (d) {
+					showActionMessage(messageWithCacheStatus('已清除全部搜尋分析資料。', d), 4000);
+					load(curFrom, curTo);
+				})
+				.catch(function (e) {
+					showActionMessage(e && 'ys_ss_analytics_busy' === e.code
+						? '搜尋分析正在更新，請稍後再試。'
+						: '清理失敗，請稍後再試。');
+				})
+				.finally(function () {
+					deleteAllAnalyticsBtn.disabled = false;
+					updateSelectionControls();
+				});
+		});
 
 		/* 快速區間 */
 		document.querySelectorAll('[data-ss-range]').forEach(function (btn) {

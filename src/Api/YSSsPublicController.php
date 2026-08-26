@@ -131,13 +131,14 @@ final class YSSsPublicController {
 		}
 
 		try {
+			$event_hash = hash_hmac( 'sha256', "ys-ss-receipt-event\0" . $receipt_param, wp_salt( 'nonce' ) );
 			YSSsQueryRepository::log(
 				$claims['query'],
 				$input['raw'],
 				$claims['total'],
 				$claims['content_types'],
 				$source,
-				$claims['visitor_hash']
+				$event_hash
 			);
 		} catch ( \Throwable $e ) {
 			// 分析旁路：任何寫入失敗都不回錯誤給前台。

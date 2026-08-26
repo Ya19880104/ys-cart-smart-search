@@ -26,6 +26,7 @@ runTests([
 		const recent = JSON.parse(h.sandbox.localStorage.getItem('ysss_recent_v2') || '[]');
 		assert(1 === recent.length && 'Alpha Pro' === recent[0], 'positive result did not preserve exact displayed recent search');
 		assert(1 === h.beacons.length && 'receipt-alpha-new' === (h.beaconPayload(0) || {}).receipt, 'older response replaced newest analytics proof');
+		assert('1' === (form.querySelector('input[name="ys_ss_client_logged"]') || {}).value, 'proved list submit did not mark its client-owned analytics event');
 	}],
 	['zero result and receipt-less submit preserve v1.5.2 admission rules', async () => {
 		const h = createHarness();
@@ -41,6 +42,7 @@ runTests([
 		recent = JSON.parse(h.sandbox.localStorage.getItem('ysss_recent_v2') || '[]');
 		assert(1 === recent.length && 'Alpha Pro' === recent[0], 'receipt-less quick submit polluted browser recent history');
 		assert(1 === h.beacons.length, 'receipt-less quick submit sent analytics');
+		assert(!form.querySelector('input[name="ys_ss_client_logged"]'), 'receipt-less quick submit suppressed its server-side fallback logger');
 	}],
 	['category-only proof logs analytics but never enters recent history', async () => {
 		const h = createHarness();

@@ -99,6 +99,12 @@ final class YSSsAdminController {
 				'term' => [ 'type' => 'string', 'required' => true ],
 			],
 		] );
+
+		register_rest_route( self::NS, $base . '/terms', [
+			'methods'             => \WP_REST_Server::DELETABLE,
+			'callback'            => [ $this, 'delete_terms' ],
+			'permission_callback' => [ $this, 'permission_admin' ],
+		] );
 	}
 
 	/**
@@ -326,6 +332,33 @@ final class YSSsAdminController {
 	}
 
 	/**
+	 * Checkbox batch delete. Exact terms remain unsanitized text values and are bound by prepared
+	 * SQL in the repository; the request is strictly bounded before any database work.
+	 */
+	public function delete_terms( \WP_REST_Request $request ) {
+		$terms = $request->get_param( 'terms' );
+		if ( ! is_array( $terms ) || count( $terms ) < 1 || count( $terms ) > 100 ) {
+			return $this->invalid_delete_terms_error();
+		}
+
+		$accepted = [];
+		foreach ( $terms as $term ) {
+			if ( ! is_string( $term ) || '' === trim( $term ) || strlen( $term ) > 2048
+				|| 1 !== preg_match( '//u', $term ) ) {
+				return $this->invalid_delete_terms_error();
+			}
+			$accepted[] = $term;
+		}
+
+		try {
+			$deleted = YSSsQueryRepository::delete_terms( $accepted );
+			return $this->mutation_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+		} catch ( YSSsAnalyticsMutationException $error ) {
+			return $this->mutation_error( $error );
+		}
+	}
+
+	/**
 	 * @return string|\WP_Error
 	 */
 	private function parse_keyword( mixed $value ) {
@@ -354,6 +387,14 @@ final class YSSsAdminController {
 			'ys_ss_keyword_write_failed',
 			__( '關鍵字資料更新失敗，請稍後再試。', 'ys-cart-smart-search' ),
 			[ 'status' => 500 ]
+		);
+	}
+
+	private function invalid_delete_terms_error(): \WP_Error {
+		return new \WP_Error(
+			'ys_ss_invalid_terms',
+			__( '請勾選 1 到 100 個有效搜尋關鍵字。', 'ys-cart-smart-search' ),
+			[ 'status' => 400 ]
 		);
 	}
 

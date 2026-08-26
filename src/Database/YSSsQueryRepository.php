@@ -31,9 +31,9 @@ final class YSSsQueryRepository {
 	}
 
 	/**
-	 * 行為紀錄寫入（唯一寫入瓶頸）。內建伺服器端 600 秒去重：對「同訪客 + 同正規化詞」於近
-	 * 600 秒內已記錄者略過（跨來源），因此公開 /log 端點即使被重複呼叫也無法灌爆搜尋分析
-	 *（前端 sessionStorage 去重僅為體驗、非安全邊界）。失敗絕不影響搜尋主流程。
+	 * 行為紀錄寫入（唯一寫入瓶頸）。`$event_hash` identifies one completed search event, not a
+	 * visitor/term window: replaying the same receipt/request is deduplicated, while a later genuine
+	 * search for the same term remains countable. Failures never affect the search path.
 	 */
 	public static function log(
 		string $query,
@@ -41,7 +41,7 @@ final class YSSsQueryRepository {
 		int $results_total,
 		string $content_types,
 		string $source,
-		string $visitor_hash
+		string $event_hash
 	): void {
 		global $wpdb;
 
@@ -50,26 +50,25 @@ final class YSSsQueryRepository {
 			return;
 		}
 
-		// Analytics-only admission：搜尋本身由 prepared SQL／escaping 保護；這裡只拒絕攻擊、
-		// 已知 query parameters 與高信心機器亂數，避免污染報表與自動熱門詞。
+		// Analytics-only admission: shared raw-input rejection and empty input are the only exclusions.
+		// Rate limiting controls volume; normal parameters, model numbers, and repeated terms are data.
 		if ( ! YSSsAnalyticsAdmission::should_record( $admission_ingress, $results_total ) ) {
 			return;
 		}
 
 		$table = YSSsSchema::queries_table();
-		$vh    = substr( $visitor_hash, 0, 16 );
+		$vh    = substr( $event_hash, 0, 16 );
 		$lock  = 'ys_ss_log_' . substr( hash( 'sha256', $wpdb->prefix . '|' . $vh . '|' . $norm ), 0, 54 );
 
-		// GET_LOCK 將同訪客 + 同詞的 check-and-insert 串行化；鎖忙時分析旁路直接捨棄此次事件。
-		// 這避免兩個同 receipt 併發請求同時看到 miss 後雙寫。
+		// GET_LOCK serializes an exact event replay; a busy analytics side-channel drops the event.
 		$acquired = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock ) );
 		if ( 1 !== $acquired ) {
 			return;
 		}
 
 		try {
-			// 伺服器端去重：同訪客 + 同詞近 600 秒內已記錄則略過（用 norm_time 索引：同詞
-			// 600 秒內列數極少，再濾 visitor_hash 很快）。
+			// Exact event replay dedupe. The existing column name is retained for schema compatibility;
+			// its value is now a privacy-safe event hash supplied by the trusted caller.
 			$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 600 );
 			$dup   = (int) $wpdb->get_var( $wpdb->prepare(
 				"SELECT 1 FROM {$table} WHERE query_norm = %s AND created_at >= %s AND visitor_hash = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -97,8 +96,8 @@ final class YSSsQueryRepository {
 	}
 
 	/**
-	 * 結果頁（B 模式）server 端記錄（source='page'）。去重已下沉至 log()
-	 *（同訪客 + 同詞 600 秒跨來源），此處僅標記來源、不再重複去重邏輯。
+	 * 結果頁（B 模式）server 端記錄（source='page'）。每次 HTTP request 取得自己的 event hash；
+	 * 若同一 request path 重入 log()，唯一寫入瓶頸會將它視為同一事件。
 	 */
 	public static function log_page(
 		string $query,
@@ -107,7 +106,15 @@ final class YSSsQueryRepository {
 		string $content_types,
 		string $visitor_hash
 	): void {
-		self::log( $query, $admission_ingress, $results_total, $content_types, 'page', $visitor_hash );
+		$started = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) && is_numeric( $_SERVER['REQUEST_TIME_FLOAT'] )
+			? sprintf( '%.6F', (float) $_SERVER['REQUEST_TIME_FLOAT'] )
+			: sprintf( '%.6F', microtime( true ) );
+		$event_hash = hash_hmac(
+			'sha256',
+			"ys-ss-page-event\0" . $visitor_hash . "\0" . $query . "\0" . $started,
+			wp_salt( 'nonce' )
+		);
+		self::log( $query, $admission_ingress, $results_total, $content_types, 'page', $event_hash );
 	}
 
 	/**
@@ -314,24 +321,45 @@ final class YSSsQueryRepository {
 	 * @return array{queries:int,daily:int,total:int} 各表與合計刪除筆數。
 	 */
 	public static function delete_term( string $term ): array {
+		return self::delete_terms( [ $term ] );
+	}
+
+	/**
+	 * Delete up to 100 normalized terms from raw and daily analytics in one transaction.
+	 *
+	 * @param array<int,string> $terms
+	 * @return array{queries:int,daily:int,total:int}
+	 */
+	public static function delete_terms( array $terms ): array {
 		global $wpdb;
-		$norm = self::normalize( $term );
-		if ( '' === $norm ) {
+		$norms = [];
+		foreach ( array_slice( $terms, 0, 100 ) as $term ) {
+			if ( ! is_string( $term ) ) {
+				continue;
+			}
+			$norm = self::normalize( $term );
+			if ( '' !== $norm ) {
+				$norms[ $norm ] = $norm;
+			}
+		}
+		$norms = array_values( $norms );
+		if ( ! $norms ) {
 			return [ 'queries' => 0, 'daily' => 0, 'total' => 0 ];
 		}
 		$queries = YSSsSchema::queries_table();
 		$daily   = YSSsSchema::terms_daily_table();
+		$placeholders = implode( ', ', array_fill( 0, count( $norms ), '%s' ) );
 
-		return self::with_maintenance_lock( static function () use ( $wpdb, $queries, $daily, $norm ): array {
+		return self::with_maintenance_lock( static function () use ( $wpdb, $queries, $daily, $placeholders, $norms ): array {
 			self::assert_transactional_tables( $queries, $daily );
 
-			return self::with_transaction( static function () use ( $wpdb, $queries, $daily, $norm ): array {
-				$dq = $wpdb->query( $wpdb->prepare( "DELETE FROM {$queries} WHERE query_norm = %s", $norm ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			return self::with_transaction( static function () use ( $wpdb, $queries, $daily, $placeholders, $norms ): array {
+				$dq = $wpdb->query( $wpdb->prepare( "DELETE FROM {$queries} WHERE query_norm IN ({$placeholders})", $norms ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				if ( false === $dq ) {
 					throw YSSsAnalyticsMutationException::database_failure();
 				}
 
-				$dd = $wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE term = %s", $norm ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$dd = $wpdb->query( $wpdb->prepare( "DELETE FROM {$daily} WHERE term IN ({$placeholders})", $norms ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				if ( false === $dd ) {
 					throw YSSsAnalyticsMutationException::database_failure();
 				}
