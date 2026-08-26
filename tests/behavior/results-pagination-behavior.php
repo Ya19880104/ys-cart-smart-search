@@ -648,6 +648,24 @@ ysss_test('distinct page-one terms share the thirty-per-minute log budget withou
     }
 });
 
+ysss_test('unavailable page rate authority preserves rendering with zero analytics work', static function (): void {
+    $db = ysss_pagination_fixture(1);
+    $baseGetVar = $db->getVarHandler;
+    $db->getVarHandler = static function (string $sql, YSSsFakeWpdb $wpdb) use ($baseGetVar): mixed {
+        if (str_contains($sql, 'GET_LOCK') && str_contains($sql, 'ys_ss_rate_')) {
+            return 0;
+        }
+        return null !== $baseGetVar ? $baseGetVar($sql, $wpdb) : 0;
+    };
+    $_GET['ys_ec_search'] = 'nova';
+    $_GET['ys_ss_page'] = '1';
+
+    $html = YSSsResultsPage::render();
+
+    ysss_assert_contains('Nova Product 1', $html, 'Rate authority failure changed page rendering');
+    ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'Rate authority failure reached page analytics insert');
+});
+
 ysss_test('a malicious deep request resolved to page one cannot manufacture page-one analytics', static function (): void {
     ysss_pagination_fixture(
         0,

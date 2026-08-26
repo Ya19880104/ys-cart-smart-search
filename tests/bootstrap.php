@@ -541,7 +541,8 @@ if (!class_exists('WP_Post')) {
             public int $ID,
             public string $post_type = 'page',
             public string $post_status = 'publish',
-            public string $post_content = ''
+            public string $post_content = '',
+            public string $post_password = ''
         ) {
         }
     }
@@ -894,6 +895,68 @@ if (!function_exists('has_shortcode')) {
     function has_shortcode(string $content, string $tag): bool
     {
         return str_contains($content, '[' . $tag . ']');
+    }
+}
+
+if (!function_exists('get_shortcode_regex')) {
+    /**
+     * Core-compatible shortcode matcher for the focused test runtime.
+     * Capture groups intentionally match WordPress get_shortcode_regex().
+     *
+     * @param list<string>|null $tagnames
+     */
+    function get_shortcode_regex(?array $tagnames = null): string
+    {
+        $tagnames ??= array_keys(YSSsWpFake::$shortcodes);
+        $tagregexp = implode('|', array_map('preg_quote', $tagnames));
+
+        return '\\['
+            . '(\\[?)'
+            . "({$tagregexp})"
+            . '(?![\\w-])'
+            . '('
+            .     '[^\\]\\/]*'
+            .     '(?:'
+            .         '\\/(?!\\])'
+            .         '[^\\]\\/]*'
+            .     ')*?'
+            . ')'
+            . '(?:'
+            .     '(\\/)'
+            .     '\\]'
+            . '|'
+            .     '\\]'
+            .     '(?:'
+            .         '('
+            .             '[^\\[]*+'
+            .             '(?:'
+            .                 '\\[(?!\\/\\2\\])'
+            .                 '[^\\[]*+'
+            .             ')*+'
+            .         ')'
+            .         '\\[\\/\\2\\]'
+            .     ')?'
+            . ')'
+            . '(\\]?)';
+    }
+}
+
+if (!function_exists('wp_html_split')) {
+    /**
+     * Focused HTML-token seam: preserve text while returning ordinary tags,
+     * comments and CDATA as distinct tokens, matching the core contract consumed here.
+     *
+     * @return list<string>
+     */
+    function wp_html_split(string $input): array
+    {
+        $parts = preg_split(
+            '/(<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?[A-Za-z][^>]*>)/',
+            $input,
+            -1,
+            PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY
+        );
+        return false === $parts ? [$input] : array_values($parts);
     }
 }
 

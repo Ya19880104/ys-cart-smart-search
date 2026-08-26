@@ -55,7 +55,43 @@ final class YSSsResultsPage {
 		return $post instanceof \WP_Post
 			&& 'page' === $post->post_type
 			&& 'publish' === $post->post_status
-			&& has_shortcode( (string) $post->post_content, self::SHORTCODE );
+			&& '' === (string) $post->post_password
+			&& self::has_executable_shortcode( (string) $post->post_content );
+	}
+
+	/**
+	 * 使用 WordPress 自己的 HTML token 與 shortcode grammar，只接受內容文字區實際會執行的
+	 * shortcode；HTML attribute、comment、CDATA 與 [[escaped]] 形式不構成可用結果頁。
+	 */
+	private static function has_executable_shortcode( string $content ): bool {
+		if ( false === strpos( $content, '[' )
+			|| ! function_exists( 'wp_html_split' )
+			|| ! function_exists( 'get_shortcode_regex' ) ) {
+			return false;
+		}
+
+		$pattern = '~' . get_shortcode_regex( [ self::SHORTCODE ] ) . '~s';
+		foreach ( wp_html_split( $content ) as $segment ) {
+			if ( ! is_string( $segment ) || '' === $segment || '<' === $segment[0] ) {
+				continue;
+			}
+
+			$matches = [];
+			$result  = preg_match_all( $pattern, $segment, $matches, PREG_SET_ORDER );
+			if ( false === $result || 0 === $result ) {
+				continue;
+			}
+			foreach ( $matches as $match ) {
+				if ( self::SHORTCODE !== ( $match[2] ?? '' ) ) {
+					continue;
+				}
+				if ( '[' === ( $match[1] ?? '' ) && ']' === ( $match[6] ?? '' ) ) {
+					continue;
+				}
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

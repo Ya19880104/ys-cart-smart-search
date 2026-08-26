@@ -310,6 +310,65 @@ ysss_test('only a published shortcode page satisfies the configured results-page
             "{$status} results page was accepted as public navigation authority"
         );
     }
+    YSSsWpFake::$posts[768] = new WP_Post(768, 'page', 'publish', '[ys_ss_search_results]', 'secret');
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(768),
+        'Password-protected results page was accepted as anonymous navigation authority'
+    );
+    $protected = YSSsSettings::all();
+    $protected['results_mode'] = 'page';
+    $protected['results_page_id'] = 768;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $protected;
+    ysss_assert_same(
+        'https://example.test/shop/',
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::page_url(),
+        'Password-protected page did not use the exact shop fallback'
+    );
+    ysss_assert_same(
+        'https://example.test/shop/?ys_ec_search=nova',
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::search_url('nova'),
+        'Password-protected page did not use the exact public search fallback'
+    );
+    YSSsWpFake::$posts[767] = new WP_Post(767, 'page', 'publish', '[ys_ss_search_results]', '0');
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(767),
+        'String-zero password was treated as empty by a truthiness check'
+    );
+    YSSsWpFake::$posts[766] = new WP_Post(766, 'page', 'publish', '[[ys_ss_search_results]]');
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(766),
+        'Escaped-only shortcode text was accepted as executable page content'
+    );
+    YSSsWpFake::$posts[765] = new WP_Post(765, 'page', 'publish', '[[ys_ss_search_results]] [ys_ss_search_results foo="bar"]');
+    ysss_assert_true(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(765),
+        'An active shortcode with attributes was rejected beside escaped text'
+    );
+    YSSsWpFake::$posts[764] = new WP_Post(764, 'page', 'publish', '<!-- [ys_ss_search_results] -->');
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(764),
+        'HTML-comment-only shortcode was accepted even though WordPress does not execute it'
+    );
+    YSSsWpFake::$posts[763] = new WP_Post(763, 'page', 'publish', '<![CDATA[[ys_ss_search_results]]]>');
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(763),
+        'CDATA-only shortcode was accepted even though WordPress does not execute it'
+    );
+    YSSsWpFake::$posts[762] = new WP_Post(762, 'page', 'publish', '<!-- wp:shortcode -->[ys_ss_search_results]<!-- /wp:shortcode -->');
+    ysss_assert_true(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(762),
+        'Gutenberg block comments hid the active shortcode between them'
+    );
+    YSSsWpFake::$posts[751] = new WP_Post(751, 'page', 'publish', '<div data-search="[ys_ss_search_results]"></div>');
+    ysss_assert_false(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(751),
+        'Attribute-only shortcode was accepted as visible result-page content'
+    );
+    YSSsWpFake::$posts[750] = new WP_Post(750, 'page', 'publish', '<div>[ys_ss_search_results]</div>');
+    ysss_assert_true(
+        \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(750),
+        'Active shortcode in normal element text was rejected'
+    );
     YSSsWpFake::$posts[769] = new WP_Post(769, 'page', 'publish', '[ys_ss_search_results]');
     ysss_assert_true(\YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(769));
 });
@@ -340,6 +399,37 @@ ysss_test('unchanged page-mode save self-heals an invalid configured page during
     ysss_assert_same(802, $result->get_data()['settings']['results_page_id'] ?? null);
     ysss_assert_same(802, YSSsSettings::all()['results_page_id'] ?? null, 'Response did not reread authoritative storage after self-heal');
     ysss_assert_true(isset(YSSsWpFake::$posts[802]), 'Successfully provisioned page was rolled back');
+});
+
+ysss_test('unchanged page-mode save replaces a password-protected configured page', static function (): void {
+    YSSsWpFake::reset();
+    $stored = YSSsSettings::all();
+    $stored['results_mode'] = 'page';
+    $stored['results_page_id'] = 821;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $stored;
+    YSSsWpFake::$posts[821] = new WP_Post(821, 'page', 'publish', '[ys_ss_search_results]', 'secret');
+    $insertCalls = [];
+    $GLOBALS['ysss_results_page_insert_handler'] = static function (array $post, bool $wpError) use (&$insertCalls): int {
+        $insertCalls[] = ['post' => $post, 'wp_error' => $wpError];
+        YSSsWpFake::$posts[822] = new WP_Post(822, 'page', 'publish', (string) ($post['post_content'] ?? ''));
+        return 822;
+    };
+
+    try {
+        $result = (new YSSsAdminController())->settings_save(new WP_REST_Request([
+            'results_mode' => 'page',
+            'results_page_id' => 821,
+        ]));
+    } finally {
+        $GLOBALS['ysss_results_page_insert_handler'] = null;
+    }
+
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(1, count($insertCalls), 'Password-protected page did not trigger one self-heal provision attempt');
+    ysss_assert_same(822, $result->get_data()['settings']['results_page_id'] ?? null);
+    ysss_assert_same(822, YSSsSettings::all()['results_page_id'] ?? null);
+    ysss_assert_true(\YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(822));
+    ysss_assert_same('secret', YSSsWpFake::$posts[821]->post_password ?? null, 'Self-heal altered the old protected page');
 });
 
 ysss_test('failed page-id storage rolls back every created page so retry cannot leave orphans', static function (): void {
