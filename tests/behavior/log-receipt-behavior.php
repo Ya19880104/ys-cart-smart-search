@@ -464,17 +464,19 @@ ysss_test('log controller replays across UTC midnight with one repository dedupe
         'exp' => $issueAt + 120,
     ]);
     $dedupeSql = [];
-    $GLOBALS['wpdb']->getVarHandler = static function (string $sql) use (&$dedupeSql): int {
+    $dedupeClockPhases = [];
+    $GLOBALS['wpdb']->getVarHandler = static function (string $sql) use (&$dedupeSql, &$dedupeClockPhases): int {
         if (str_contains($sql, 'GET_LOCK') || str_contains($sql, 'RELEASE_LOCK')) {
             return 1;
         }
         if (str_contains($sql, 'SELECT 1 FROM')) {
             $dedupeSql[] = $sql;
+            $dedupeClockPhases[] = (int) ($GLOBALS['ysss_receipt_security_now'] ?? 0);
             return count($dedupeSql) > 1 ? 1 : 0;
         }
         return 0;
     };
-    $GLOBALS['ysss_receipt_security_now'] = $verifyAt;
+    $GLOBALS['ysss_receipt_security_now'] = $issueAt;
     $GLOBALS['ysss_receipt_security_time_calls'] = 0;
 
     try {
@@ -484,12 +486,14 @@ ysss_test('log controller replays across UTC midnight with one repository dedupe
             'receipt' => $receipt,
             'source' => 'bar',
         ]));
+        $GLOBALS['ysss_receipt_security_now'] = $verifyAt;
         $second = (new YSSsPublicController())->log(new WP_REST_Request([
             'q' => 'nova',
             'total' => 999,
             'receipt' => $receipt,
             'source' => 'bar',
         ]));
+        $securityTimeCalls = (int) $GLOBALS['ysss_receipt_security_time_calls'];
     } finally {
         unset($GLOBALS['ysss_receipt_security_now'], $GLOBALS['ysss_receipt_security_time_calls']);
     }
@@ -499,6 +503,8 @@ ysss_test('log controller replays across UTC midnight with one repository dedupe
     ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Cross-midnight replay bypassed repository dedupe');
     ysss_assert_same($issueVisitor, $GLOBALS['wpdb']->inserts[0]['data']['visitor_hash'] ?? null, 'Repository received verification-day identity instead of the signed issue-day identity');
     ysss_assert_same(2, count($dedupeSql), 'Both replay attempts did not reach the real repository dedupe check');
+    ysss_assert_same([$issueAt, $verifyAt], $dedupeClockPhases, 'Repository was not reached once before and once after UTC midnight');
+    ysss_assert_same(2, $securityTimeCalls, 'Each log verification did not capture exactly one phase clock');
     $wrongIdentitySql = array_values(array_filter(
         $dedupeSql,
         static fn(string $sql): bool => !str_contains($sql, "visitor_hash = '{$issueVisitor}'")
