@@ -113,12 +113,28 @@ final class YSSsFakeWpdb
 {
     public string $prefix = 'wp_';
     public string $last_error = '';
+    public int $insert_id = 0;
 
     /** @var list<string> */
     public array $queries = [];
 
     /** @var list<array{table:string,data:array<string,mixed>}> */
     public array $inserts = [];
+
+    /** @var list<array{table:string,data:array<string,mixed>,where:array<string,mixed>}> */
+    public array $updates = [];
+
+    /** @var list<array{table:string,where:array<string,mixed>}> */
+    public array $deletes = [];
+
+    /** @var null|Closure(string,array<string,mixed>,self):int|false */
+    public ?Closure $insertHandler = null;
+
+    /** @var null|Closure(string,array<string,mixed>,array<string,mixed>,self):int|false */
+    public ?Closure $updateHandler = null;
+
+    /** @var null|Closure(string,array<string,mixed>,self):int|false */
+    public ?Closure $deleteHandler = null;
 
     /** @var list<mixed> */
     public array $varResults = [];
@@ -216,7 +232,34 @@ final class YSSsFakeWpdb
 
     public function insert(string $table, array $data): int|false
     {
+        $this->insert_id = 0;
         $this->inserts[] = ['table' => $table, 'data' => $data];
+        if (null !== $this->insertHandler) {
+            $result = ($this->insertHandler)($table, $data, $this);
+            if (false === $result) {
+                $this->insert_id = 0;
+            }
+            return $result;
+        }
+        $this->insert_id = count($this->inserts);
+        return 1;
+    }
+
+    public function update(string $table, array $data, array $where): int|false
+    {
+        $this->updates[] = ['table' => $table, 'data' => $data, 'where' => $where];
+        if (null !== $this->updateHandler) {
+            return ($this->updateHandler)($table, $data, $where, $this);
+        }
+        return 1;
+    }
+
+    public function delete(string $table, array $where): int|false
+    {
+        $this->deletes[] = ['table' => $table, 'where' => $where];
+        if (null !== $this->deleteHandler) {
+            return ($this->deleteHandler)($table, $where, $this);
+        }
         return 1;
     }
 
@@ -241,8 +284,59 @@ final class YSSsWpFake
     /** @var list<array{key:string,value:mixed}> */
     public static array $optionUpdates = [];
 
+    /** @var list<array{key:string,default:mixed}> */
+    public static array $optionGets = [];
+
+    /** @var list<array{key:string,value:mixed,deprecated:string,autoload:mixed}> */
+    public static array $optionAdds = [];
+
+    /** @var list<array{key:string,value:mixed,autoload:mixed}> */
+    public static array $optionUpdateCalls = [];
+
+    /** @var list<array{key:string}> */
+    public static array $optionDeletes = [];
+
+    /** @var list<array{operation:string,key:string}> */
+    public static array $optionAccesses = [];
+
+    /** @var null|Closure(string,mixed):mixed */
+    public static ?Closure $getOptionHandler = null;
+
+    /** @var null|Closure(string,mixed,string,mixed):bool */
+    public static ?Closure $addOptionHandler = null;
+
+    /** @var null|Closure(string,mixed,mixed):bool */
+    public static ?Closure $updateOptionHandler = null;
+
+    /** @var null|Closure(string):bool */
+    public static ?Closure $deleteOptionHandler = null;
+
     /** @var null|Closure(string,mixed):void */
     public static ?Closure $updateOptionBeforeWrite = null;
+
+    /** @var list<array{key:string}> */
+    public static array $transientGets = [];
+
+    /** @var list<array{key:string,value:mixed,expiration:int}> */
+    public static array $transientSets = [];
+
+    /** @var list<array{key:string}> */
+    public static array $transientDeletes = [];
+
+    /** @var null|Closure(string):mixed */
+    public static ?Closure $getTransientHandler = null;
+
+    /** @var null|Closure(string,mixed,int):bool */
+    public static ?Closure $setTransientHandler = null;
+
+    /** @var null|Closure(string):bool */
+    public static ?Closure $deleteTransientHandler = null;
+
+    /** @var null|Closure(int):string */
+    public static ?Closure $randomBytesHandler = null;
+
+    /** @var list<string> */
+    public static array $errorLogs = [];
 
     /** @var array<string,list<array{priority:int,callback:callable,accepted:int}>> */
     public static array $filters = [];
@@ -257,7 +351,24 @@ final class YSSsWpFake
     {
         self::$transients = [];
         self::$optionUpdates = [];
+        self::$optionGets = [];
+        self::$optionAdds = [];
+        self::$optionUpdateCalls = [];
+        self::$optionDeletes = [];
+        self::$optionAccesses = [];
+        self::$getOptionHandler = null;
+        self::$addOptionHandler = null;
+        self::$updateOptionHandler = null;
+        self::$deleteOptionHandler = null;
         self::$updateOptionBeforeWrite = null;
+        self::$transientGets = [];
+        self::$transientSets = [];
+        self::$transientDeletes = [];
+        self::$getTransientHandler = null;
+        self::$setTransientHandler = null;
+        self::$deleteTransientHandler = null;
+        self::$randomBytesHandler = null;
+        self::$errorLogs = [];
         self::$filters = [];
         self::$shortcodes = [];
         self::$routes = [];
@@ -321,6 +432,17 @@ if (!class_exists('WP_REST_Request')) {
         public function get_param(string $key): mixed
         {
             return $this->params[$key] ?? null;
+        }
+
+        public function has_param(string $key): bool
+        {
+            return array_key_exists($key, $this->params);
+        }
+
+        /** @return array<string,mixed> */
+        public function get_json_params(): array
+        {
+            return $this->params;
         }
 
         public function offsetExists(mixed $offset): bool
@@ -432,6 +554,10 @@ if (!function_exists('sanitize_title')) {
 if (!function_exists('get_transient')) {
     function get_transient(string $key): mixed
     {
+        YSSsWpFake::$transientGets[] = ['key' => $key];
+        if (null !== YSSsWpFake::$getTransientHandler) {
+            return (YSSsWpFake::$getTransientHandler)($key);
+        }
         return YSSsWpFake::$transients[$key] ?? false;
     }
 }
@@ -439,6 +565,10 @@ if (!function_exists('get_transient')) {
 if (!function_exists('set_transient')) {
     function set_transient(string $key, mixed $value, int $expiration): bool
     {
+        YSSsWpFake::$transientSets[] = ['key' => $key, 'value' => $value, 'expiration' => $expiration];
+        if (null !== YSSsWpFake::$setTransientHandler) {
+            return (YSSsWpFake::$setTransientHandler)($key, $value, $expiration);
+        }
         YSSsWpFake::$transients[$key] = $value;
         return true;
     }
@@ -447,6 +577,10 @@ if (!function_exists('set_transient')) {
 if (!function_exists('delete_transient')) {
     function delete_transient(string $key): bool
     {
+        YSSsWpFake::$transientDeletes[] = ['key' => $key];
+        if (null !== YSSsWpFake::$deleteTransientHandler) {
+            return (YSSsWpFake::$deleteTransientHandler)($key);
+        }
         unset(YSSsWpFake::$transients[$key]);
         return true;
     }
@@ -455,6 +589,11 @@ if (!function_exists('delete_transient')) {
 if (!function_exists('get_option')) {
     function get_option(string $key, mixed $default = false): mixed
     {
+        YSSsWpFake::$optionGets[] = ['key' => $key, 'default' => $default];
+        YSSsWpFake::$optionAccesses[] = ['operation' => 'get', 'key' => $key];
+        if (null !== YSSsWpFake::$getOptionHandler) {
+            return (YSSsWpFake::$getOptionHandler)($key, $default);
+        }
         return YSSsWpFake::$options[$key] ?? $default;
     }
 }
@@ -463,6 +602,11 @@ if (!function_exists('update_option')) {
     function update_option(string $key, mixed $value, mixed $autoload = null): bool
     {
         YSSsWpFake::$optionUpdates[] = ['key' => $key, 'value' => $value];
+        YSSsWpFake::$optionUpdateCalls[] = ['key' => $key, 'value' => $value, 'autoload' => $autoload];
+        YSSsWpFake::$optionAccesses[] = ['operation' => 'update', 'key' => $key];
+        if (null !== YSSsWpFake::$updateOptionHandler) {
+            return (YSSsWpFake::$updateOptionHandler)($key, $value, $autoload);
+        }
         if (null !== YSSsWpFake::$updateOptionBeforeWrite) {
             (YSSsWpFake::$updateOptionBeforeWrite)($key, $value);
         }
@@ -474,11 +618,48 @@ if (!function_exists('update_option')) {
 if (!function_exists('add_option')) {
     function add_option(string $key, mixed $value, string $deprecated = '', mixed $autoload = null): bool
     {
+        YSSsWpFake::$optionAdds[] = [
+            'key' => $key,
+            'value' => $value,
+            'deprecated' => $deprecated,
+            'autoload' => $autoload,
+        ];
+        YSSsWpFake::$optionAccesses[] = ['operation' => 'add', 'key' => $key];
+        if (null !== YSSsWpFake::$addOptionHandler) {
+            return (YSSsWpFake::$addOptionHandler)($key, $value, $deprecated, $autoload);
+        }
         if (array_key_exists($key, YSSsWpFake::$options)) {
             return false;
         }
         YSSsWpFake::$options[$key] = $value;
         return true;
+    }
+}
+
+if (!function_exists('delete_option')) {
+    function delete_option(string $key): bool
+    {
+        YSSsWpFake::$optionDeletes[] = ['key' => $key];
+        YSSsWpFake::$optionAccesses[] = ['operation' => 'delete', 'key' => $key];
+        if (null !== YSSsWpFake::$deleteOptionHandler) {
+            return (YSSsWpFake::$deleteOptionHandler)($key);
+        }
+        $existed = array_key_exists($key, YSSsWpFake::$options);
+        unset(YSSsWpFake::$options[$key]);
+        return $existed;
+    }
+}
+
+if (!function_exists('rest_sanitize_boolean')) {
+    function rest_sanitize_boolean(mixed $value): bool
+    {
+        if (is_string($value)) {
+            $value = strtolower($value);
+            if (in_array($value, ['false', '0'], true)) {
+                return false;
+            }
+        }
+        return (bool) $value;
     }
 }
 

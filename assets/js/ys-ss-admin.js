@@ -19,6 +19,97 @@
 		});
 	}
 
+	var CACHE_WARNING_MESSAGE = '資料已更新，但熱門建議快取可能延遲更新。';
+	var KEYWORD_FAILURE_MESSAGE = '關鍵字更新失敗，請稍後再試。';
+	var keywordQueue = Promise.resolve();
+	var keywordOperationGeneration = 0;
+	var keywordItems = [];
+	var keywordRenderer = null;
+	var pendingKeywordControls = new WeakSet();
+
+	function messageWithCacheStatus(message, payload) {
+		return payload && 'failed' === payload.cache_status
+			? message + '\n' + CACHE_WARNING_MESSAGE
+			: message;
+	}
+
+	function normalizeKeywordItems(items) {
+		if (!Array.isArray(items)) { return null; }
+		var clean = [];
+		for (var i = 0; i < items.length; i++) {
+			var item = items[i];
+			if (!item || 'object' !== typeof item || Array.isArray(item)
+				|| 'number' !== typeof item.id || !Number.isInteger(item.id) || item.id <= 0
+				|| 'string' !== typeof item.keyword
+				|| 'number' !== typeof item.sort_order || !Number.isInteger(item.sort_order)
+				|| 'boolean' !== typeof item.is_active) {
+				return null;
+			}
+			clean.push({
+				id: item.id,
+				keyword: item.keyword,
+				sort_order: item.sort_order,
+				is_active: item.is_active,
+			});
+		}
+		return clean;
+	}
+
+	function redrawKeywordItems() {
+		if (keywordRenderer) { keywordRenderer(keywordItems); }
+	}
+
+	function runKeywordMutation(path, options, control, callbacks) {
+		callbacks = callbacks || {};
+		if (control && pendingKeywordControls.has(control)) {
+			return keywordQueue;
+		}
+
+		var operation = ++keywordOperationGeneration;
+		var committed = false;
+		if (control) {
+			pendingKeywordControls.add(control);
+			control.disabled = true;
+		}
+		if (callbacks.onPending) { callbacks.onPending(); }
+
+		var request = keywordQueue.then(function () {
+			return api(path, options);
+		});
+		// A rejected request must never poison the authority for the next queued write.
+		keywordQueue = request.then(function () {}, function () {});
+
+		return request.then(function (payload) {
+			var confirmed = normalizeKeywordItems(payload && payload.items);
+			if (null === confirmed) { throw new Error('invalid keyword mutation payload'); }
+			keywordItems = confirmed;
+			committed = true;
+			if (operation === keywordOperationGeneration) {
+				redrawKeywordItems();
+				if (callbacks.onSuccess) { callbacks.onSuccess(payload); }
+				if (callbacks.showMessage) {
+					callbacks.showMessage(messageWithCacheStatus(callbacks.successMessage || '✓ 關鍵字已更新', payload));
+				}
+			}
+			return payload;
+		}).catch(function () {
+			if (operation === keywordOperationGeneration) {
+				redrawKeywordItems();
+				if (callbacks.onFailure) { callbacks.onFailure(); }
+				if (callbacks.showMessage) {
+					callbacks.showMessage(callbacks.failureMessage || KEYWORD_FAILURE_MESSAGE);
+				}
+			}
+			return null;
+		}).finally(function () {
+			if (!control) { return; }
+			pendingKeywordControls.delete(control);
+			if (!(committed && operation === keywordOperationGeneration && callbacks.keepDisabledOnSuccess)) {
+				control.disabled = false;
+			}
+		});
+	}
+
 	/* ═════════ 設定頁 ═════════ */
 
 	function initSettings() {
@@ -79,7 +170,7 @@
 			saveBtn.disabled = true;
 			showSettingsMessage('儲存中…');
 			api('/settings', { method: 'POST', body: JSON.stringify(collect()) })
-				.then(function () { showSettingsMessage('✓ 已儲存', 2500); })
+				.then(function (d) { showSettingsMessage(messageWithCacheStatus('✓ 已儲存', d), 2500); })
 				.catch(function () { showSettingsMessage('儲存失敗，請稍後再試。'); })
 				.finally(function () {
 					saveBtn.disabled = false;
@@ -90,6 +181,7 @@
 		var tbody = document.querySelector('#ys-ss-kw-table tbody');
 
 		function renderKeywords(items) {
+			if (!tbody) { return; }
 			tbody.textContent = '';
 			if (!items.length) {
 				var tr0 = document.createElement('tr');
@@ -107,7 +199,12 @@
 				var inK = document.createElement('input');
 				inK.type = 'text'; inK.value = item.keyword; inK.maxLength = 100; inK.className = 'ys-ss-kw-edit';
 				inK.addEventListener('change', function () {
-					api('/keywords/' + item.id, { method: 'POST', body: JSON.stringify({ keyword: inK.value }) }).then(function (d) { renderKeywords(d.items); });
+					runKeywordMutation(
+						'/keywords/' + item.id,
+						{ method: 'POST', body: JSON.stringify({ keyword: inK.value }) },
+						inK,
+						{ showMessage: showSettingsMessage }
+					);
 				});
 				tdK.appendChild(inK);
 
@@ -115,7 +212,12 @@
 				var inS = document.createElement('input');
 				inS.type = 'number'; inS.value = item.sort_order; inS.className = 'ys-ss-kw-sort';
 				inS.addEventListener('change', function () {
-					api('/keywords/' + item.id, { method: 'POST', body: JSON.stringify({ sort_order: parseInt(inS.value || '0', 10) }) }).then(function (d) { renderKeywords(d.items); });
+					runKeywordMutation(
+						'/keywords/' + item.id,
+						{ method: 'POST', body: JSON.stringify({ sort_order: parseInt(inS.value || '0', 10) }) },
+						inS,
+						{ showMessage: showSettingsMessage }
+					);
 				});
 				tdS.appendChild(inS);
 
@@ -123,7 +225,12 @@
 				var inA = document.createElement('input');
 				inA.type = 'checkbox'; inA.checked = !!item.is_active;
 				inA.addEventListener('change', function () {
-					api('/keywords/' + item.id, { method: 'POST', body: JSON.stringify({ is_active: inA.checked }) }).then(function (d) { renderKeywords(d.items); });
+					runKeywordMutation(
+						'/keywords/' + item.id,
+						{ method: 'POST', body: JSON.stringify({ is_active: inA.checked }) },
+						inA,
+						{ showMessage: showSettingsMessage }
+					);
 				});
 				tdA.appendChild(inA);
 
@@ -131,7 +238,12 @@
 				var del = document.createElement('button');
 				del.type = 'button'; del.className = 'ysca-btn ysca-btn--sm ysca-btn--ghost'; del.textContent = '刪除';
 				del.addEventListener('click', function () {
-					api('/keywords/' + item.id, { method: 'DELETE' }).then(function (d) { renderKeywords(d.items); });
+					runKeywordMutation(
+						'/keywords/' + item.id,
+						{ method: 'DELETE' },
+						del,
+						{ showMessage: showSettingsMessage }
+					);
 				});
 				tdD.appendChild(del);
 
@@ -140,16 +252,28 @@
 			});
 		}
 
-		try { renderKeywords(JSON.parse(app.getAttribute('data-keywords') || '[]')); } catch (e) { renderKeywords([]); }
+		keywordRenderer = renderKeywords;
+		try {
+			keywordItems = normalizeKeywordItems(JSON.parse(app.getAttribute('data-keywords') || '[]')) || [];
+		} catch (e) {
+			keywordItems = [];
+		}
+		redrawKeywordItems();
 
 		document.getElementById('ys-ss-kw-add').addEventListener('click', function () {
 			var input = document.getElementById('ys-ss-kw-input');
 			var kw = (input.value || '').trim();
 			if (!kw) { return; }
-			api('/keywords', { method: 'POST', body: JSON.stringify({ keyword: kw }) }).then(function (d) {
-				input.value = '';
-				renderKeywords(d.items);
-			});
+			var addButton = document.getElementById('ys-ss-kw-add');
+			runKeywordMutation(
+				'/keywords',
+				{ method: 'POST', body: JSON.stringify({ keyword: kw }) },
+				addButton,
+				{
+					showMessage: showSettingsMessage,
+					onSuccess: function () { input.value = ''; },
+				}
+			);
 		});
 
 		/* 清理 */
@@ -165,7 +289,7 @@
 			showSettingsMessage('清理中…');
 			api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'expired' }) }).then(function (d) {
 				counts.textContent = fmtCounts(d.counts);
-				showSettingsMessage('已清理 ' + d.deleted + ' 筆逾期資料', 3000);
+				showSettingsMessage(messageWithCacheStatus('已清理 ' + d.deleted + ' 筆逾期資料', d), 3000);
 			}).catch(function () {
 				showSettingsMessage('清理失敗，請稍後再試。');
 			}).finally(function () {
@@ -181,7 +305,7 @@
 			showSettingsMessage('清理中…');
 			api('/purge', { method: 'POST', body: JSON.stringify({ mode: 'all', confirm: 'DELETE' }) }).then(function (d) {
 				counts.textContent = fmtCounts(d.counts);
-				showSettingsMessage('已清除全部搜尋分析資料。', 3000);
+				showSettingsMessage(messageWithCacheStatus('已清除全部搜尋分析資料。', d), 3000);
 			}).catch(function () {
 				showSettingsMessage('清理失敗，請稍後再試。');
 			}).finally(function () {
@@ -277,7 +401,7 @@
 				.then(function (d) {
 					var total = parseInt(d && d.deleted && d.deleted.total, 10);
 					if (!Number.isFinite(total) || total < 0) { total = 0; }
-					showActionMessage('已刪除 ' + total + ' 筆搜尋紀錄。', 4000);
+					showActionMessage(messageWithCacheStatus('已刪除 ' + total + ' 筆搜尋紀錄。', d), 4000);
 					load(curFrom, curTo);
 				})
 				.catch(function (e) {
@@ -326,10 +450,17 @@
 				btn.className = 'ysca-btn ysca-btn--sm ysca-btn--ghost';
 				btn.textContent = '＋設為關鍵字';
 				btn.addEventListener('click', function () {
-					api('/keywords', { method: 'POST', body: JSON.stringify({ keyword: r.term }) }).then(function () {
-						btn.textContent = '✓ 已加入';
-						btn.disabled = true;
-					});
+					runKeywordMutation(
+						'/keywords',
+						{ method: 'POST', body: JSON.stringify({ keyword: r.term }) },
+						btn,
+						{
+							showMessage: showActionMessage,
+							successMessage: '✓ 已加入關鍵字',
+							onSuccess: function () { btn.textContent = '✓ 已加入'; },
+							keepDisabledOnSuccess: true,
+						}
+					);
 				});
 				tdA.appendChild(btn);
 				tdA.appendChild(delButton(r.term));

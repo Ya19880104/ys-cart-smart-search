@@ -21,6 +21,7 @@ use YangSheep\SmartSearch\Database\YSSsKeywordRepository;
 use YangSheep\SmartSearch\Database\YSSsAnalyticsMutationException;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Security\YSSsSearchInput;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
 defined( 'ABSPATH' ) || exit;
@@ -187,37 +188,48 @@ final class YSSsAdminController {
 	}
 
 	public function keywords_create( \WP_REST_Request $request ) {
-		$keyword = sanitize_text_field( wp_unslash( (string) $request->get_param( 'keyword' ) ) );
+		$keyword = $this->parse_keyword( $request->get_param( 'keyword' ) );
+		if ( $keyword instanceof \WP_Error ) {
+			return $keyword;
+		}
 		$sort    = (int) $request->get_param( 'sort_order' );
 		$id      = YSSsKeywordRepository::create( $keyword, $sort );
 		if ( $id <= 0 ) {
-			return new \WP_Error( 'ys_ss_invalid_keyword', __( '關鍵字不可為空。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
+			return $this->keyword_write_error();
 		}
-		YSSsSuggestService::invalidate();
-		return rest_ensure_response( [ 'id' => $id, 'items' => YSSsKeywordRepository::all() ] );
+		return $this->mutation_response( [ 'id' => $id, 'items' => YSSsKeywordRepository::all() ] );
 	}
 
 	public function keywords_update( \WP_REST_Request $request ) {
 		$id    = (int) $request['id'];
 		$patch = [];
-		if ( null !== $request->get_param( 'keyword' ) ) {
-			$patch['keyword'] = sanitize_text_field( wp_unslash( (string) $request->get_param( 'keyword' ) ) );
+		if ( $request->has_param( 'keyword' ) ) {
+			$keyword = $this->parse_keyword( $request->get_param( 'keyword' ) );
+			if ( $keyword instanceof \WP_Error ) {
+				return $keyword;
+			}
+			$patch['keyword'] = $keyword;
 		}
-		if ( null !== $request->get_param( 'sort_order' ) ) {
+		if ( $request->has_param( 'sort_order' ) ) {
 			$patch['sort_order'] = (int) $request->get_param( 'sort_order' );
 		}
-		if ( null !== $request->get_param( 'is_active' ) ) {
+		if ( $request->has_param( 'is_active' ) ) {
 			$patch['is_active'] = rest_sanitize_boolean( $request->get_param( 'is_active' ) );
 		}
-		YSSsKeywordRepository::update( $id, $patch );
-		YSSsSuggestService::invalidate();
-		return rest_ensure_response( [ 'items' => YSSsKeywordRepository::all() ] );
+		if ( ! $patch ) {
+			return $this->invalid_keyword_error();
+		}
+		if ( ! YSSsKeywordRepository::update( $id, $patch ) ) {
+			return $this->keyword_write_error();
+		}
+		return $this->mutation_response( [ 'items' => YSSsKeywordRepository::all() ] );
 	}
 
 	public function keywords_delete( \WP_REST_Request $request ) {
-		YSSsKeywordRepository::delete( (int) $request['id'] );
-		YSSsSuggestService::invalidate();
-		return rest_ensure_response( [ 'items' => YSSsKeywordRepository::all() ] );
+		if ( ! YSSsKeywordRepository::delete( (int) $request['id'] ) ) {
+			return $this->keyword_write_error();
+		}
+		return $this->mutation_response( [ 'items' => YSSsKeywordRepository::all() ] );
 	}
 
 	public function settings_get() {
@@ -233,8 +245,14 @@ final class YSSsAdminController {
 			return new \WP_Error( 'ys_ss_bad_payload', 'invalid payload', [ 'status' => 400 ] );
 		}
 		$settings = YSSsSettings::update( $patch );
-		YSSsSuggestService::invalidate();
-		return rest_ensure_response( [ 'settings' => $settings ] );
+		if ( $settings !== YSSsSettings::all() ) {
+			return new \WP_Error(
+				'ys_ss_settings_write_failed',
+				__( '設定儲存失敗，請稍後再試。', 'ys-cart-smart-search' ),
+				[ 'status' => 500 ]
+			);
+		}
+		return $this->mutation_response( [ 'settings' => $settings ] );
 	}
 
 	public function purge( \WP_REST_Request $request ) {
@@ -255,14 +273,12 @@ final class YSSsAdminController {
 					return new \WP_Error( 'ys_ss_confirm_required', __( '請輸入確認碼 DELETE。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
 				}
 				YSSsQueryRepository::purge_all();
-				YSSsSuggestService::invalidate();
-				return rest_ensure_response( [ 'ok' => true, 'counts' => YSSsQueryRepository::counts() ] );
+				return $this->mutation_response( [ 'ok' => true, 'counts' => YSSsQueryRepository::counts() ] );
 			}
 
 			$settings = YSSsSettings::all();
 			$deleted  = YSSsQueryRepository::purge_older_than( (int) $settings['retention_days'] );
-			YSSsSuggestService::invalidate();
-			return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+			return $this->mutation_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
 		} catch ( YSSsAnalyticsMutationException $error ) {
 			return $this->mutation_error( $error );
 		}
@@ -282,11 +298,62 @@ final class YSSsAdminController {
 
 		try {
 			$deleted = YSSsQueryRepository::delete_term( $term );
-			YSSsSuggestService::invalidate();
-			return rest_ensure_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
+			return $this->mutation_response( [ 'ok' => true, 'deleted' => $deleted, 'counts' => YSSsQueryRepository::counts() ] );
 		} catch ( YSSsAnalyticsMutationException $error ) {
 			return $this->mutation_error( $error );
 		}
+	}
+
+	/**
+	 * @return string|\WP_Error
+	 */
+	private function parse_keyword( mixed $value ) {
+		if ( ! is_string( $value ) ) {
+			return $this->invalid_keyword_error();
+		}
+		$decision = YSSsSearchInput::inspect( wp_unslash( $value ) );
+		if ( $decision['blocked'] || '' === $decision['query'] ) {
+			return $this->invalid_keyword_error();
+		}
+		return $decision['query'];
+	}
+
+	private function invalid_keyword_error(): \WP_Error {
+		return new \WP_Error(
+			'ys_ss_invalid_keyword',
+			__( '關鍵字不可為空。', 'ys-cart-smart-search' ),
+			[ 'status' => 400 ]
+		);
+	}
+
+	private function keyword_write_error(): \WP_Error {
+		return new \WP_Error(
+			'ys_ss_keyword_write_failed',
+			__( '關鍵字資料更新失敗，請稍後再試。', 'ys-cart-smart-search' ),
+			[ 'status' => 500 ]
+		);
+	}
+
+	private function mutation_response( array $payload ): \WP_REST_Response {
+		$status = YSSsSuggestService::INVALIDATION_FAILED;
+		try {
+			$candidate = YSSsSuggestService::invalidate();
+			if ( in_array( $candidate, [
+				YSSsSuggestService::INVALIDATION_ROTATED,
+				YSSsSuggestService::INVALIDATION_BYPASS_FRESH,
+				YSSsSuggestService::INVALIDATION_FAILED,
+			], true ) ) {
+				$status = $candidate;
+			}
+		} catch ( \Throwable $error ) {
+			$status = YSSsSuggestService::INVALIDATION_FAILED;
+		}
+
+		$payload['cache_status'] = $status;
+		if ( YSSsSuggestService::INVALIDATION_FAILED === $status ) {
+			$payload['cache_warning'] = __( '資料已更新，但熱門建議快取可能延遲更新。', 'ys-cart-smart-search' );
+		}
+		return rest_ensure_response( $payload );
 	}
 
 	private function mutation_error( YSSsAnalyticsMutationException $error ): \WP_Error {

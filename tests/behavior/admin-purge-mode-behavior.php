@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use YangSheep\SmartSearch\Api\YSSsAdminController;
+use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
 foreach ([
     'src/Security/YSSsInjectionGuard.php',
@@ -120,6 +122,8 @@ ysss_test('successful exact delete returns total and invalidates suggestions onc
     $result = (new YSSsAdminController())->delete_term(new WP_REST_Request(['term' => 'Nova']));
     ysss_assert_true($result instanceof WP_REST_Response);
     ysss_assert_same(3, $result->get_data()['deleted']['total'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_ROTATED, $result->get_data()['cache_status'] ?? null);
+    ysss_assert_false(isset($result->get_data()['cache_warning']));
     $generationUpdates = array_values(array_filter(
         YSSsWpFake::$optionUpdates,
         static fn(array $update): bool => 'ys_ss_suggest_cache_generation' === $update['key']
@@ -154,6 +158,8 @@ ysss_test('successful full purge commits and invalidates suggestions once', stat
     $result = (new YSSsAdminController())->purge(new WP_REST_Request(['mode' => 'all', 'confirm' => 'DELETE']));
     ysss_assert_true($result instanceof WP_REST_Response);
     ysss_assert_same(true, $result->get_data()['ok'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_ROTATED, $result->get_data()['cache_status'] ?? null);
+    ysss_assert_false(isset($result->get_data()['cache_warning']));
     $generationUpdates = array_values(array_filter(
         YSSsWpFake::$optionUpdates,
         static fn(array $update): bool => 'ys_ss_suggest_cache_generation' === $update['key']
@@ -175,4 +181,105 @@ ysss_test('expired purge database failure is sanitized and does not invalidate s
     ysss_assert_same(500, $result->get_error_data()['status'] ?? null);
     ysss_assert_false(str_contains($result->get_error_message(), 'SECRET'));
     ysss_assert_false(isset(YSSsWpFake::$options['ys_ss_suggest_cache_generation']), 'Failed expired purge invalidated suggestions');
+});
+
+ysss_test('idempotent settings save succeeds only when normalized readback matches', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$options[YSSsSettings::OPTION] = YSSsSettings::all();
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
+        if (YSSsSettings::OPTION === $key) {
+            return false;
+        }
+        YSSsWpFake::$options[$key] = $value;
+        return true;
+    };
+
+    $result = (new YSSsAdminController())->settings_save(new WP_REST_Request(['suggest_count' => 8]));
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(8, $result->get_data()['settings']['suggest_count'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_ROTATED, $result->get_data()['cache_status'] ?? null);
+    $generationWrites = array_values(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    ));
+    ysss_assert_same(1, count($generationWrites), 'Matching settings readback did not invalidate exactly once');
+});
+
+ysss_test('mismatching settings readback returns fixed 500 with zero invalidation', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$options[YSSsSettings::OPTION] = YSSsSettings::all();
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
+        if (YSSsSettings::OPTION === $key) {
+            return false;
+        }
+        YSSsWpFake::$options[$key] = $value;
+        return true;
+    };
+
+    $result = (new YSSsAdminController())->settings_save(new WP_REST_Request(['suggest_count' => 17]));
+    ysss_assert_true($result instanceof WP_Error);
+    ysss_assert_same('ys_ss_settings_write_failed', $result->get_error_code());
+    ysss_assert_same(500, $result->get_error_data()['status'] ?? null);
+    ysss_assert_false(str_contains($result->get_error_message(), 'SECRET'));
+    ysss_assert_same([], YSSsWpFake::$optionAdds, 'Mismatching settings readback created a cache marker');
+    $generationWrites = array_values(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    ));
+    ysss_assert_same([], $generationWrites, 'Mismatching settings readback rotated cache');
+});
+
+ysss_test('exact delete committed payload survives total cache-authority failure', static function (): void {
+    YSSsWpFake::reset();
+    $GLOBALS['wpdb']->queryHandler = static function (string $sql): int|false {
+        if (str_starts_with($sql, 'DELETE FROM wp_ys_ss_queries')) {
+            return 2;
+        }
+        if (str_starts_with($sql, 'DELETE FROM wp_ys_ss_terms_daily')) {
+            return 1;
+        }
+        return 1;
+    };
+    YSSsWpFake::$addOptionHandler = static fn(string $key, mixed $value, string $deprecated, mixed $autoload): bool => false;
+    YSSsWpFake::$updateOptionHandler = static fn(string $key, mixed $value, mixed $autoload): bool => false;
+
+    $result = (new YSSsAdminController())->delete_term(new WP_REST_Request(['term' => 'Nova']));
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(3, $result->get_data()['deleted']['total'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_FAILED, $result->get_data()['cache_status'] ?? null);
+    ysss_assert_same('資料已更新，但熱門建議快取可能延遲更新。', $result->get_data()['cache_warning'] ?? null);
+});
+
+ysss_test('expired purge committed counts survive total cache-authority failure', static function (): void {
+    YSSsWpFake::reset();
+    $GLOBALS['wpdb']->queryHandler = static function (string $sql): int|false {
+        if (str_starts_with($sql, 'DELETE FROM wp_ys_ss_queries')) {
+            return 2;
+        }
+        if (str_starts_with($sql, 'DELETE FROM wp_ys_ss_terms_daily')) {
+            return 1;
+        }
+        return 1;
+    };
+    YSSsWpFake::$addOptionHandler = static fn(string $key, mixed $value, string $deprecated, mixed $autoload): bool => false;
+    YSSsWpFake::$updateOptionHandler = static fn(string $key, mixed $value, mixed $autoload): bool => false;
+
+    $result = (new YSSsAdminController())->purge(new WP_REST_Request(['mode' => 'expired']));
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(3, $result->get_data()['deleted'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_FAILED, $result->get_data()['cache_status'] ?? null);
+    ysss_assert_same('資料已更新，但熱門建議快取可能延遲更新。', $result->get_data()['cache_warning'] ?? null);
+});
+
+ysss_test('full purge committed result survives total cache-authority failure', static function (): void {
+    YSSsWpFake::reset();
+    $GLOBALS['wpdb']->queryHandler = static fn(string $sql): int|false => 0;
+    YSSsWpFake::$addOptionHandler = static fn(string $key, mixed $value, string $deprecated, mixed $autoload): bool => false;
+    YSSsWpFake::$updateOptionHandler = static fn(string $key, mixed $value, mixed $autoload): bool => false;
+
+    $result = (new YSSsAdminController())->purge(new WP_REST_Request(['mode' => 'all', 'confirm' => 'DELETE']));
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(true, $result->get_data()['ok'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_FAILED, $result->get_data()['cache_status'] ?? null);
+    ysss_assert_same('資料已更新，但熱門建議快取可能延遲更新。', $result->get_data()['cache_warning'] ?? null);
 });

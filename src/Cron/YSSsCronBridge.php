@@ -32,11 +32,17 @@ final class YSSsCronBridge {
 			$settings = YSSsSettings::all();
 			YSSsQueryRepository::purge_older_than( (int) $settings['retention_days'] );
 
-			YSSsSuggestService::invalidate();
+			$status = YSSsSuggestService::invalidate();
+			if ( ! in_array( $status, [
+				YSSsSuggestService::INVALIDATION_ROTATED,
+				YSSsSuggestService::INVALIDATION_BYPASS_FRESH,
+			], true ) ) {
+				throw new \RuntimeException( 'suggestion cache authority unavailable' );
+			}
 			YSSsSuggestService::suggestions(); // 重建快取
 		} catch ( \Throwable $e ) {
 			// 分析旁路：cron 例外不向外拋（不影響核心每日批次的其他訂閱者）。
-			error_log( '[ys-cart-smart-search] daily cron error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			error_log( '[ys-cart-smart-search] daily cron error.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 		}
 	}
 }

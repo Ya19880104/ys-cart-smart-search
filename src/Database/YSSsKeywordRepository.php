@@ -44,12 +44,15 @@ final class YSSsKeywordRepository {
 		if ( '' === $keyword ) {
 			return 0;
 		}
-		$wpdb->insert( YSSsSchema::keywords_table(), [
+		$result = $wpdb->insert( YSSsSchema::keywords_table(), [
 			'keyword'    => $keyword,
 			'sort_order' => $sort_order,
 			'is_active'  => 1,
 			'created_at' => current_time( 'mysql' ),
 		] );
+		if ( false === $result ) {
+			return 0;
+		}
 		return (int) $wpdb->insert_id;
 	}
 
