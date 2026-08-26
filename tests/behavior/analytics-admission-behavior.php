@@ -76,6 +76,9 @@ $token_local_cases = [
     ['SKU-9F8A7B6C5D4E3F2A %71wertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
     ['ＳＫＵ－９Ｆ８Ａ７Ｂ６Ｃ５Ｄ４Ｅ３Ｆ２Ａ qwertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
     ['SKU: qwertyuiopasdfghjklzxcvb qwertyuiopasdfghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['qwertyuiopas%64fghjklzxcvb', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['ｑｗｅｒｔｙｕｉｏｐａｓｄｆｇｈｊｋｌｚｘｃｖｂ', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN, false],
+    ['SKU-ABCD qwertyuiopasdfghjklzxcvb', 2, YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT, true],
 ];
 
 foreach ($token_local_cases as $index => [$query, $total, $expected, $should_insert]) {
