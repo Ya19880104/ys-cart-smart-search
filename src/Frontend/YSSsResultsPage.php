@@ -321,14 +321,23 @@ final class YSSsResultsPage {
 	 * 否則（A 模式或無有效結果頁）→ 商店頁 + ys_ec_search（與既有 A 行為一致）。
 	 * 與 form_action()／核心搜尋同一參數 ys_ec_search。
 	 */
-	public static function search_url( string $query ): string {
-		$settings = YSSsSettings::all();
-		$is_page  = 'page' === ( $settings['results_mode'] ?? 'list' )
+	public static function search_url( string $query, ?string $exact_ingress = null, string $receipt = '' ): string {
+		$settings        = YSSsSettings::all();
+		$configured_page = 'page' === ( $settings['results_mode'] ?? 'list' );
+		$is_page         = $configured_page
 			&& self::valid_page_id( (int) ( $settings['results_page_id'] ?? 0 ) );
 		if ( $is_page ) {
 			return add_query_arg( 'ys_ec_search', $query, self::page_url() );
 		}
-		return YSSmartSearchDetector::shop_url( [ 'ys_ec_search' => $query ] );
+		if ( $configured_page ) {
+			return YSSmartSearchDetector::shop_url( [ 'ys_ec_search' => $query ] );
+		}
+
+		$args = [ 'ys_ec_search' => null === $exact_ingress ? $query : $exact_ingress ];
+		if ( '' !== $receipt ) {
+			$args['ys_ss_log_receipt'] = $receipt;
+		}
+		return YSSmartSearchDetector::shop_url( $args );
 	}
 
 	/**

@@ -60,19 +60,22 @@ final class YSSsInjectionGuard {
 			return true;
 		}
 
+		// Ordinary SQL comments do not execute by themselves. Fold them before every SQL grammar
+		// check so comment-separated statement boundaries cannot bypass the same decision.
+		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
+		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
+
 		// Stacked-query probes require a statement boundary plus an explicit SQL command word.
-		// Optional closing parentheses cover probes such as "'); DROP TABLE" while natural product text
+		// Start/closing-parenthesis boundaries cover probes such as "); DROP TABLE" while natural product text
 		// such as "Drop Table 桌遊" remains searchable because it has no injected statement boundary.
 		if ( preg_match(
-			'~(?:[\'"`]|\b\d+)\s*\){0,8}\s*;\s*(?:select|insert|replace|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|handler|load|set|show|describe|desc|explain|use|lock|unlock|begin|start|commit|rollback)\b~iu',
-			$scan
+			'~(?:^|[\'"`]|\b\d+|\))\s*\){0,8}\s*;\s*(?:select|insert|replace|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|handler|load|set|show|describe|desc|explain|use|lock|unlock|begin|start|commit|rollback)\b~iu',
+			$sql
 		) ) {
 			return true;
 		}
 
-		// SQL comments 先折成空白，以識別 UNION/**/SELECT；不攔自然語言的 "Drop Table" 書名。
-		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
-		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
+		// 不攔自然語言的 "Drop Table" 書名。
 		if ( preg_match( '/\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark|load_file)\s*\(/iu', $sql )
 			|| preg_match( '/[\'"\d)]\s+\b(?:or|and)\s+(?:true|false)\b\s*(?:--|#|;|$)/iu', $sql )
 			|| preg_match( '/\b(?:or|and)\s+([\p{L}\p{N}_.-]{1,64})\s*=\s*\1\b/iu', $sql )

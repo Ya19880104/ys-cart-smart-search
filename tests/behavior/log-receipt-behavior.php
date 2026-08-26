@@ -5,6 +5,8 @@ namespace {
 
 use YangSheep\SmartSearch\Api\YSSsPublicController;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
+use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Frontend\YSSsResultsPage;
 use YangSheep\SmartSearch\Security\YSSsLogReceipt;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Services\YSSsSearchService;
@@ -285,6 +287,59 @@ ysss_test('query signs the non-zero total produced by the server search', static
         'content_types' => 'products',
         'visitor_hash' => $visitor,
     ], $claims, 'Receipt did not bind the complete server-computed result');
+});
+
+ysss_test('list-mode view-all carries the exact ingress and matching signed receipt', static function (): void {
+    YSSsWpFake::reset();
+    $raw = 'Nova   Coat';
+    $GLOBALS['wpdb']->resultSets = [[[
+        'id' => 19,
+        'title' => 'Nova Coat',
+        'slug' => 'nova-coat',
+        'sku' => 'NOVA-19',
+        'price' => '1500',
+        'sale_price' => '1290',
+        'image_url' => '',
+    ]]];
+    $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => $raw]));
+    ysss_assert_true($response instanceof WP_REST_Response);
+    $data = $response->get_data();
+    $query = [];
+    parse_str((string) (parse_url((string) ($data['view_all'] ?? ''), PHP_URL_QUERY) ?? ''), $query);
+    ysss_assert_same($raw, $query['ys_ec_search'] ?? null, 'View-all URL did not preserve the receipt-bound ingress');
+    ysss_assert_same($data['log_receipt'] ?? null, $query['ys_ss_log_receipt'] ?? null, 'View-all URL did not carry its matching receipt');
+    ysss_assert_true(null !== YSSsLogReceipt::verify_bound(
+        (string) ($data['log_receipt'] ?? ''),
+        (string) ($data['q'] ?? ''),
+        $raw,
+        YSSsRateLimiter::visitor_hash()
+    ), 'View-all receipt no longer verifies against its exact ingress');
+});
+
+ysss_test('page-mode view-all keeps its canonical destination without a list receipt', static function (): void {
+    YSSsWpFake::reset();
+    $settings = YSSsSettings::all();
+    $settings['results_mode'] = 'page';
+    $settings['results_page_id'] = 902;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $settings;
+    YSSsWpFake::$posts[902] = new WP_Post(902, 'page', 'publish', '[ys_ss_search_results]');
+    $GLOBALS['wpdb']->resultSets = [[[
+        'id' => 20,
+        'title' => 'Nova Page Coat',
+        'slug' => 'nova-page-coat',
+        'sku' => 'NOVA-20',
+        'price' => '1600',
+        'sale_price' => '0',
+        'image_url' => '',
+    ]]];
+    $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => 'Nova   Page']));
+    $data = $response->get_data();
+    $expected = YSSsResultsPage::search_url((string) ($data['q'] ?? ''));
+    ysss_assert_same($expected, $data['view_all'] ?? null, 'Page-mode view-all changed from its canonical destination');
+    $query = [];
+    parse_str((string) (parse_url($expected, PHP_URL_QUERY) ?? ''), $query);
+    ysss_assert_same($data['q'] ?? null, $query['ys_ec_search'] ?? null, 'Page-mode destination stopped using the canonical query');
+    ysss_assert_false(array_key_exists('ys_ss_log_receipt', $query), 'Page-mode destination received a list-owned receipt');
 });
 
 ysss_test('category and post only query keeps display total but signs zero product authority', static function () use ($receiptClaims): void {

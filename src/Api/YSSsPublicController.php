@@ -13,6 +13,7 @@ namespace YangSheep\SmartSearch\Api;
 
 use YangSheep\SmartSearch\Analytics\YSSsAnalyticsAdmission;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
+use YangSheep\SmartSearch\Frontend\YSSsResultsPage;
 use YangSheep\SmartSearch\Security\YSSsLogReceipt;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
 use YangSheep\SmartSearch\Security\YSSsSearchInput;
@@ -84,6 +85,11 @@ final class YSSsPublicController {
 			$visitor,
 			$raw,
 			$now
+		);
+		$result['view_all'] = YSSsResultsPage::search_url(
+			(string) ( $result['q'] ?? '' ),
+			$raw,
+			(string) $result['log_receipt']
 		);
 
 		$response = rest_ensure_response( $result );

@@ -57,6 +57,28 @@ runTests([
 		assert(0 === h.beacons.length, 'rejected beacon was treated as queued');
 		assert('receipt-server-fallback' === (form.querySelector('input[name="ys_ss_log_receipt"]') || {}).value, 'beacon rejection suppressed the signed server fallback');
 	}],
+	['beacon rejection on a result click falls back to accepted keepalive transport', async () => {
+		const h = createHarness({ sendBeaconResult: false });
+		const { input, panel } = h.forms[0];
+		input.value = 'Exact Click Fallback'; h.dispatch(input, 'input'); h.advanceTimers(250);
+		await h.resolveJson(0, {
+			q: 'exact click fallback', total: 1, products_total: 1,
+			groups: [{ type: 'products', label: 'results', items: [{ title: 'Fallback target', url: '/fallback-target' }], total: 1 }],
+			view_all: '', log_receipt: 'receipt-click-fallback', recent_term: 'Exact Click Fallback',
+		});
+		panel.querySelector('.ys-ss-item').click();
+		assert(0 === h.beacons.length, 'rejected result-click beacon was treated as queued');
+		assert(2 === h.pendingFetches.length && h.pendingFetches[1].url.endsWith('/log'), 'result click did not fall back to the log endpoint');
+		assert('POST' === h.pendingFetches[1].options.method && true === h.pendingFetches[1].options.keepalive, 'result-click fallback was not a keepalive POST');
+		const payload = JSON.parse(h.pendingFetches[1].options.body || '{}');
+		assert('receipt-click-fallback' === payload.receipt && 'exact click fallback' === payload.q, 'result-click fallback lost signed canonical authority');
+		assert('Exact Click Fallback' === payload.ingress && 'bar' === payload.source, 'result-click fallback lost exact ingress or source');
+		assert(null === h.sandbox.sessionStorage.getItem('ysss_logged'), 'client dedupe committed before fallback transport acceptance');
+		await h.resolveJson(1, { ok: true });
+		assert(null !== h.sandbox.sessionStorage.getItem('ysss_logged'), 'accepted fallback transport did not commit client dedupe');
+		panel.querySelector('.ys-ss-item').click();
+		assert(2 === h.pendingFetches.length, 'accepted receipt was sent more than once in the session');
+	}],
 	['category-only proof logs analytics but never enters recent history', async () => {
 		const h = createHarness();
 		const { form, input } = h.forms[0];
@@ -142,6 +164,21 @@ runTests([
 			view_all: '', log_receipt: 'receipt-ime',
 		});
 		assert(panel.textContent.includes('ime-results'), 'IME-completed query did not render its result');
+	}],
+	['list submit aligns the actual input control with the receipt-bound ingress', async () => {
+		const h = createHarness();
+		const { form, input } = h.forms[0];
+		input.value = '  Nova Coat  '; h.dispatch(input, 'input'); h.advanceTimers(250);
+		assert(h.pendingFetches[0].url.endsWith('/query?q=Nova%20Coat'), 'query request did not use the trimmed accepted ingress');
+		await h.resolveJson(0, {
+			q: 'nova coat', total: 1, products_total: 1,
+			groups: [{ type: 'products', label: 'results', items: [{ title: 'Nova Coat', url: '/nova-coat' }], total: 1 }],
+			view_all: '', log_receipt: 'receipt-trimmed-ingress', recent_term: 'Nova Coat',
+		});
+		h.dispatch(form, 'submit');
+		assert('Nova Coat' === input.value, 'actual form input retained bytes outside the receipt-bound ingress');
+		assert('receipt-trimmed-ingress' === (form.querySelector('input[name="ys_ss_log_receipt"]') || {}).value, 'trimmed submit lost its signed destination receipt');
+		assert('Nova Coat' === (h.beaconPayload(0) || {}).ingress, 'client analytics did not use the same ingress as the submitted control');
 	}],
 	['analytics sends exact ingress while recent memory uses only the server-approved term', async () => {
 		const h = createHarness();

@@ -84,6 +84,7 @@
 	function logQuery(term, ingress, receipt, source) {
 		var normalized = (term || '').trim().toLowerCase();
 		if (normalized.length < 1 || typeof ingress !== 'string' || !ingress || typeof receipt !== 'string' || !receipt) { return false; }
+		var eventKey = receipt.slice(-64);
 		try {
 			var map = JSON.parse(sessionStorage.getItem(LOGGED_KEY) || '{}');
 			var now = Date.now();
@@ -91,20 +92,40 @@
 			Object.keys(map).forEach(function (key) {
 				if (!Number.isFinite(map[key]) || now - map[key] >= 600000) { delete map[key]; }
 			});
-			var eventKey = receipt.slice(-64);
 			if (map[eventKey]) { return true; }
-			map[eventKey] = now;
-			sessionStorage.setItem(LOGGED_KEY, JSON.stringify(map));
 		} catch (error) { /* 仍嘗試送出 */ }
+		function commitLogged() {
+			try {
+				var committed = JSON.parse(sessionStorage.getItem(LOGGED_KEY) || '{}');
+				var committedAt = Date.now();
+				if (!committed || 'object' !== typeof committed || Array.isArray(committed)) { committed = {}; }
+				Object.keys(committed).forEach(function (key) {
+					if (!Number.isFinite(committed[key]) || committedAt - committed[key] >= 600000) { delete committed[key]; }
+				});
+				committed[eventKey] = committedAt;
+				sessionStorage.setItem(LOGGED_KEY, JSON.stringify(committed));
+			} catch (error) { /* transport 已接受，storage 失敗不影響搜尋 */ }
+		}
 
 		var payload = JSON.stringify({ q: term, ingress: ingress, receipt: receipt, source: source });
 		var url = CFG.restUrl + '/log';
 		if (navigator.sendBeacon) {
-			navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
-		} else {
-			fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(function () {});
+			try {
+				if (navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }))) {
+					commitLogged();
+					return true;
+				}
+			} catch (error) { /* 改走 keepalive fetch */ }
 		}
-		return true;
+		try {
+			var request = fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+			request.then(function (response) {
+				if (response && response.ok) { commitLogged(); }
+			}).catch(function () {});
+			return true;
+		} catch (error) {
+			return false;
+		}
 	}
 
 	function setServerLogReceipt(form, receipt) {
@@ -503,6 +524,7 @@
 			if (!proof || proof.input !== query || !proof.receipt) { return; }
 			if (proof.productsTotal > 0) { recentPush(proof.recentTerm); }
 			if (CFG.resultsMode !== 'page') {
+				input.value = proof.input;
 				logQuery(proof.query, proof.input, proof.receipt, sourceOf(form));
 				setServerLogReceipt(form, proof.receipt);
 			}

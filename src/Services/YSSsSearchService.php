@@ -107,14 +107,12 @@ final class YSSsSearchService {
 	}
 
 	/**
-	 * Whether the term currently matches at least one published, non-excluded product.
+	 * Whether the term currently has at least one filter-final visible product.
 	 *
-	 * Automatic suggestions call this bounded existence query at their final output boundary so
+	 * Automatic suggestions call this bounded product query at their final output boundary so
 	 * historical rows, stale cache, or filters cannot display a zero-product automatic term.
 	 */
 	public static function has_product_match( string $q ): bool {
-		global $wpdb;
-
 		$norm = YSSsQueryRepository::normalize( $q );
 		if ( '' === $norm ) {
 			return false;
@@ -122,11 +120,19 @@ final class YSSsSearchService {
 
 		$settings = YSSsSettings::all();
 		$cfg      = is_array( $settings['products'] ?? null ) ? $settings['products'] : [];
-		[ $where, $where_args ] = self::build_products_where( $norm, $cfg );
-		$table = $wpdb->prefix . 'ys_ec_products';
-		$sql   = "SELECT 1 FROM {$table} WHERE status = 'publish' AND {$where} LIMIT 1";
-
-		return 1 === (int) $wpdb->get_var( $wpdb->prepare( $sql, $where_args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$group    = self::products_group( $norm, $cfg );
+		$groups   = ! empty( $group['items'] ) ? [ $group ] : [];
+		$groups   = self::normalize_filter_final_product_groups(
+			(array) apply_filters( 'ys_ss_result_groups', $groups, $norm )
+		);
+		foreach ( $groups as $candidate ) {
+			if ( is_array( $candidate )
+				&& 'products' === ( $candidate['type'] ?? null )
+				&& ! empty( $candidate['items'] ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

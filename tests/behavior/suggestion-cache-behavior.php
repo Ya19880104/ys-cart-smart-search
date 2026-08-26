@@ -23,8 +23,8 @@ foreach ([
 
 /**
  * Install an options-table authority fixture without changing the shared bootstrap fake.
- * Repository SELECTs still receive an empty result; only the two-name cache-authority
- * SELECT is intercepted here.
+ * Product authority receives one visible row by default; the two-name cache-authority
+ * SELECT is delegated to the supplied resolver.
  *
  * @param callable(string,mixed,YSSsFakeWpdb):array<int,mixed> $resolver
  */
@@ -35,6 +35,17 @@ function ysss_suggest_set_authority_rows(callable $resolver): void
         mixed $output,
         YSSsFakeWpdb $database
     ) use ($resolver): array {
+        if (str_contains($query, 'FROM wp_ys_ec_products')) {
+            return [[
+                'id' => 70,
+                'title' => 'Published Product',
+                'slug' => 'published-product',
+                'sku' => 'PUBLISHED-70',
+                'price' => '1200',
+                'sale_price' => '0',
+                'image_url' => '',
+            ]];
+        }
         if (!str_contains($query, 'ys_ss_suggest_cache_generation')
             || !str_contains($query, 'ys_ss_suggest_tombstone_')
             || 1 !== preg_match('/\bFROM\s+`?' . preg_quote($database->prefix, '/') . 'options`?/i', $query)) {
@@ -131,11 +142,27 @@ ysss_test('external suggestion filter cannot reintroduce blocked output', static
 
 ysss_test('automatic suggestions require a current published product match even from cache or filters', static function (): void {
     ysss_suggest_reset();
-    $GLOBALS['wpdb']->getVarHandler = static function (string $sql): int {
-        if (str_contains($sql, 'FROM wp_ys_ec_products') && str_contains($sql, 'live-product')) {
-            return 1;
+    $authorityHandler = $GLOBALS['wpdb']->getResultsHandler;
+    $GLOBALS['wpdb']->getResultsHandler = static function (
+        string $sql,
+        mixed $output,
+        YSSsFakeWpdb $database
+    ) use ($authorityHandler): array {
+        if (str_contains($sql, 'FROM wp_ys_ec_products')) {
+            if (!str_contains($sql, 'live-product')) {
+                return [];
+            }
+            return [[
+                'id' => 72,
+                'title' => 'Live Product',
+                'slug' => 'live-product',
+                'sku' => 'LIVE-72',
+                'price' => '1200',
+                'sale_price' => '0',
+                'image_url' => '',
+            ]];
         }
-        return 0;
+        return null === $authorityHandler ? [] : $authorityHandler($sql, $output, $database);
     };
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = '1';
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
@@ -154,6 +181,49 @@ ysss_test('automatic suggestions require a current published product match even 
     ], $payload['items'] ?? null);
     ysss_assert_true(YSSsSearchService::has_product_match('live-product'));
     ysss_assert_false(YSSsSearchService::has_product_match('stale-product'));
+});
+
+ysss_test('automatic suggestions use the filter-final visible product result', static function (): void {
+    ysss_suggest_reset();
+    $authorityHandler = $GLOBALS['wpdb']->getResultsHandler;
+    $GLOBALS['wpdb']->getResultsHandler = static function (
+        string $sql,
+        mixed $output,
+        YSSsFakeWpdb $database
+    ) use ($authorityHandler): array {
+        if (str_contains($sql, 'FROM wp_ys_ec_products')) {
+            return [[
+                'id' => 71,
+                'title' => 'Visible Product',
+                'slug' => 'visible-product',
+                'sku' => 'VISIBLE-71',
+                'price' => '1200',
+                'sale_price' => '990',
+                'image_url' => '',
+            ]];
+        }
+        return null === $authorityHandler ? [] : $authorityHandler($sql, $output, $database);
+    };
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = '1';
+    YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
+        'count' => 2,
+        'recent_enabled' => true,
+        'items' => [
+            ['term' => 'hidden-product', 'source' => 'auto'],
+            ['term' => 'visible-product', 'source' => 'auto'],
+        ],
+    ];
+    $seen = [];
+    add_filter('ys_ss_result_groups', static function (array $groups, string $norm) use (&$seen): array {
+        $seen[] = $norm;
+        return 'hidden-product' === $norm ? [] : $groups;
+    }, 10, 2);
+
+    $payload = YSSsSuggestService::suggestions();
+    ysss_assert_same([
+        ['term' => 'visible-product', 'source' => 'auto'],
+    ], $payload['items'] ?? null, 'Filter-hidden product term remained in automatic suggestions');
+    ysss_assert_same(['hidden-product', 'visible-product'], $seen, 'Automatic term authority did not use both filter-final product results');
 });
 
 ysss_test('suggest count zero stays disabled for cached candidates', static function (): void {
