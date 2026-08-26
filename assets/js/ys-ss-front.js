@@ -459,7 +459,7 @@
 				}
 
 				clearTimeout(state.settleTimer);
-				if (CFG.resultsMode !== 'page' && query.length >= 2 && state.proof) {
+				if (CFG.resultsMode !== 'page' && state.proof) {
 					var proof = state.proof;
 					var settleMode = state.mode;
 					state.settleTimer = setTimeout(function () {

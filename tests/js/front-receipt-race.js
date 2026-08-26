@@ -44,6 +44,23 @@ runTests([
 		assert(1 === h.beacons.length, 'receipt-less quick submit sent analytics');
 		assert(!form.querySelector('input[name="ys_ss_log_receipt"]'), 'receipt-less quick submit carried stale receipt authority');
 	}],
+	['single-character live searches settle positive and zero-result analytics', async () => {
+		for (const [query, total, groups, receipt] of [
+			['衣', 1, [{ type: 'products', label: 'single-result', items: [{ title: '衣', url: '/single' }], total: 1 }], 'receipt-single-positive'],
+			['☕', 0, [], 'receipt-single-zero'],
+		]) {
+			const h = createHarness();
+			const { input } = h.forms[0];
+			input.value = query; h.dispatch(input, 'input'); h.advanceTimers(250);
+			await h.resolveJson(0, {
+				q: query, total, products_total: total, groups,
+				view_all: '', log_receipt: receipt, recent_term: query,
+			});
+			assert(h.hasTimer(1200), query + ' did not receive a settle timer after server proof');
+			h.advanceTimers(1200);
+			assert(1 === h.beacons.length && receipt === (h.beaconPayload(0) || {}).receipt, query + ' live search was not recorded');
+		}
+	}],
 	['beacon rejection still carries the signed receipt to server fallback', async () => {
 		const h = createHarness({ sendBeaconResult: false });
 		const { form, input } = h.forms[0];
