@@ -1110,6 +1110,40 @@ if (!function_exists('get_the_post_thumbnail_url')) {
     }
 }
 
+// Install receipt clock seams before any behavior file can load a Security or API
+// call site. Defining these later is order-dependent because PHP may cache the
+// global time() fallback. Counters stay completely inert unless a receipt test
+// explicitly creates its tracking global.
+if (!function_exists('YangSheep\\SmartSearch\\Api\\time')) {
+    eval(<<<'PHP'
+namespace YangSheep\SmartSearch\Api {
+    function time(): int {
+        if (array_key_exists('ysss_receipt_api_time_calls', $GLOBALS)) {
+            $GLOBALS['ysss_receipt_api_time_calls'] = (int) $GLOBALS['ysss_receipt_api_time_calls'] + 1;
+        }
+        return array_key_exists('ysss_receipt_api_now', $GLOBALS)
+            ? (int) $GLOBALS['ysss_receipt_api_now']
+            : \time();
+    }
+}
+PHP);
+}
+
+if (!function_exists('YangSheep\\SmartSearch\\Security\\time')) {
+    eval(<<<'PHP'
+namespace YangSheep\SmartSearch\Security {
+    function time(): int {
+        if (array_key_exists('ysss_receipt_security_time_calls', $GLOBALS)) {
+            $GLOBALS['ysss_receipt_security_time_calls'] = (int) $GLOBALS['ysss_receipt_security_time_calls'] + 1;
+        }
+        return array_key_exists('ysss_receipt_security_now', $GLOBALS)
+            ? (int) $GLOBALS['ysss_receipt_security_now']
+            : \time();
+    }
+}
+PHP);
+}
+
 // Install the entropy seam before any behavior file can invoke SuggestService.
 // Defining this lazily inside suggestion-cache-behavior.php is order-dependent:
 // PHP may already have cached the global random_bytes() fallback at the call site.

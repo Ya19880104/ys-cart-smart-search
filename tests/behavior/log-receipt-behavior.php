@@ -1,30 +1,6 @@
 <?php
 declare(strict_types=1);
 
-namespace YangSheep\SmartSearch\Api {
-    if (!function_exists(__NAMESPACE__ . '\\time')) {
-        function time(): int
-        {
-            $GLOBALS['ysss_receipt_api_time_calls'] = (int) ($GLOBALS['ysss_receipt_api_time_calls'] ?? 0) + 1;
-            return array_key_exists('ysss_receipt_api_now', $GLOBALS)
-                ? (int) $GLOBALS['ysss_receipt_api_now']
-                : \time();
-        }
-    }
-}
-
-namespace YangSheep\SmartSearch\Security {
-    if (!function_exists(__NAMESPACE__ . '\\time')) {
-        function time(): int
-        {
-            $GLOBALS['ysss_receipt_security_time_calls'] = (int) ($GLOBALS['ysss_receipt_security_time_calls'] ?? 0) + 1;
-            return array_key_exists('ysss_receipt_security_now', $GLOBALS)
-                ? (int) $GLOBALS['ysss_receipt_security_now']
-                : \time();
-        }
-    }
-}
-
 namespace {
 
 use YangSheep\SmartSearch\Api\YSSsPublicController;
@@ -552,6 +528,41 @@ ysss_test('query response and receipt share the same total upper bound', static 
         YSSsRateLimiter::visitor_hash()
     );
     ysss_assert_same(1000000, $claims['total'] ?? null, 'Receipt total diverged from the public response');
+});
+
+ysss_test('rate windows use their own wall clock without consuming receipt phase time', static function (): void {
+    YSSsWpFake::reset();
+    $before = \time();
+    $GLOBALS['ysss_receipt_security_now'] = $before + 31536000;
+    $GLOBALS['ysss_receipt_security_time_calls'] = 0;
+
+    try {
+        $allowed = YSSsRateLimiter::allow('query', 60);
+        $after = \time();
+        $receiptClockCalls = (int) $GLOBALS['ysss_receipt_security_time_calls'];
+        $rows = array_filter(
+            YSSsWpFake::$options,
+            static fn(mixed $value, string $key): bool => str_starts_with($key, 'ys_ss_rate_v1_query_'),
+            ARRAY_FILTER_USE_BOTH
+        );
+        $parts = 1 === count($rows) ? explode(':', (string) reset($rows)) : [];
+        $expiry = (int) ($parts[1] ?? 0);
+    } finally {
+        unset($GLOBALS['ysss_receipt_security_now'], $GLOBALS['ysss_receipt_security_time_calls']);
+    }
+
+    ysss_assert_same([
+        'allowed' => true,
+        'rate_rows' => 1,
+        'receipt_clock_calls' => 0,
+        'wall_clock_expiry' => true,
+    ], [
+        'allowed' => $allowed,
+        'rate_rows' => count($rows),
+        'receipt_clock_calls' => $receiptClockCalls,
+        'wall_clock_expiry' => $expiry >= $before + MINUTE_IN_SECONDS
+            && $expiry <= $after + MINUTE_IN_SECONDS,
+    ]);
 });
 
 ysss_test('query controller captures one issue clock for visitor and receipt', static function () use ($issueAt, $issueVisitor): void {

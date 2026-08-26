@@ -60,7 +60,7 @@ final class YSSsRateLimiter {
 				$owned = true;
 				$state = self::read_state( $wpdb, $table, $key );
 				if ( null !== $state ) {
-					$now = time();
+					$now = \time();
 					if ( ! $state['exists'] || $state['expires'] <= $now ) {
 						$next_expires = $now + self::WINDOW;
 						$next_count   = 1;
