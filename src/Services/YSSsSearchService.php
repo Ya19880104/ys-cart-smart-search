@@ -215,7 +215,8 @@ final class YSSsSearchService {
 			|| $cached['page'] < 1 || $cached['page'] > 100
 			|| ! is_int( $cached['per_page'] ) || $per_page !== $cached['per_page']
 			|| ! is_int( $cached['total_pages'] )
-			|| ! is_array( $cached['groups'] ) || ! is_array( $cached['content_types'] ) ) {
+			|| ! is_array( $cached['groups'] ) || ! array_is_list( $cached['groups'] )
+			|| ! is_array( $cached['content_types'] ) || ! array_is_list( $cached['content_types'] ) ) {
 			return false;
 		}
 
@@ -224,19 +225,59 @@ final class YSSsSearchService {
 			return false;
 		}
 		foreach ( $cached['groups'] as $group ) {
-			if ( ! is_array( $group ) || ! is_string( $group['type'] ?? null )
-				|| ! is_string( $group['label'] ?? null ) || ! is_int( $group['total'] ?? null )
-				|| ! is_array( $group['items'] ?? null ) ) {
+			if ( ! is_array( $group ) || ! self::is_canonical_page_group( $group ) ) {
 				return false;
 			}
-			foreach ( $group['items'] as $item ) {
-				if ( ! is_array( $item ) ) {
-					return false;
-				}
+		}
+		$known_types = [ 'products', 'categories', 'posts' ];
+		foreach ( $cached['content_types'] as $type ) {
+			if ( ! is_string( $type ) || ! in_array( $type, $known_types, true ) ) {
+				return false;
 			}
 		}
-		foreach ( $cached['content_types'] as $type ) {
-			if ( ! is_string( $type ) ) {
+		return count( $cached['content_types'] ) === count( array_unique( $cached['content_types'] ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $group
+	 */
+	private static function is_canonical_page_group( array $group ): bool {
+		$type = $group['type'] ?? null;
+		if ( ! is_string( $type ) || ! in_array( $type, [ 'products', 'categories', 'posts' ], true )
+			|| ! is_string( $group['label'] ?? null )
+			|| ! is_int( $group['total'] ?? null ) || $group['total'] < 0
+			|| ! is_array( $group['items'] ?? null ) || ! array_is_list( $group['items'] ) ) {
+			return false;
+		}
+
+		foreach ( $group['items'] as $item ) {
+			if ( ! is_array( $item ) ) {
+				return false;
+			}
+			if ( 'products' === $type
+				&& ! self::has_string_fields( $item, [ 'title', 'url', 'image', 'price', 'price_original', 'sku' ] ) ) {
+				return false;
+			}
+			if ( 'categories' === $type
+				&& ( ! self::has_string_fields( $item, [ 'title', 'url' ] )
+					|| ! is_int( $item['count'] ?? null ) || $item['count'] < 0 ) ) {
+				return false;
+			}
+			if ( 'posts' === $type
+				&& ! self::has_string_fields( $item, [ 'title', 'url', 'image', 'excerpt' ] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * @param array<string,mixed> $item
+	 * @param list<string>        $fields
+	 */
+	private static function has_string_fields( array $item, array $fields ): bool {
+		foreach ( $fields as $field ) {
+			if ( ! array_key_exists( $field, $item ) || ! is_string( $item[ $field ] ) ) {
 				return false;
 			}
 		}

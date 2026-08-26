@@ -37,6 +37,19 @@ function ysss_pagination_product_row(int $id): array
     ];
 }
 
+/** @return array<string,string> */
+function ysss_pagination_cached_product_item(): array
+{
+    return [
+        'title' => 'Cached Nova',
+        'url' => 'https://example.test/shop/?product=cached-nova',
+        'image' => 'https://example.test/media/cached-nova.jpg',
+        'price' => 'NT$900',
+        'price_original' => 'NT$1,000',
+        'sku' => 'CACHED-NOVA',
+    ];
+}
+
 /**
  * @param list<string> $groupOrder
  * @param list<array<string,mixed>> $categoryRows
@@ -367,8 +380,64 @@ ysss_test('requested cache hits require a complete self-consistent canonical pay
             $payload['content_types'] = 'products';
             return $payload;
         },
+        'associative content types' => static function (array $payload): array {
+            $payload['content_types'] = ['primary' => 'products'];
+            return $payload;
+        },
+        'unknown content type' => static function (array $payload): array {
+            $payload['content_types'] = ['unknown'];
+            return $payload;
+        },
+        'duplicate content type' => static function (array $payload): array {
+            $payload['content_types'] = ['products', 'products'];
+            return $payload;
+        },
+        'associative groups' => static function (array $payload): array {
+            $payload['groups'] = ['primary' => $payload['groups'][0]];
+            return $payload;
+        },
+        'unknown group type' => static function (array $payload): array {
+            $payload['groups'][0]['type'] = 'unknown';
+            return $payload;
+        },
+        'negative group total' => static function (array $payload): array {
+            $payload['groups'][0]['total'] = -1;
+            return $payload;
+        },
         'non-array cached item' => static function (array $payload): array {
             $payload['groups'][0]['items'] = ['not-an-item'];
+            return $payload;
+        },
+        'associative items' => static function (array $payload): array {
+            $payload['groups'][0]['items'] = ['first' => ysss_pagination_cached_product_item()];
+            return $payload;
+        },
+        'missing product item fields' => static function (array $payload): array {
+            $payload['groups'][0]['items'] = [[]];
+            return $payload;
+        },
+        'wrong product field type' => static function (array $payload): array {
+            $item = ysss_pagination_cached_product_item();
+            $item['title'] = [];
+            $payload['groups'][0]['items'] = [$item];
+            return $payload;
+        },
+        'negative category count' => static function (array $payload): array {
+            $payload['groups'][0] = [
+                'type' => 'categories',
+                'label' => '分類',
+                'total' => 1,
+                'items' => [['title' => 'Nova 分類', 'url' => '/category/nova', 'count' => -1]],
+            ];
+            return $payload;
+        },
+        'wrong post field type' => static function (array $payload): array {
+            $payload['groups'][0] = [
+                'type' => 'posts',
+                'label' => '文章',
+                'total' => 1,
+                'items' => [['title' => 'Nova Post', 'url' => '/post/nova', 'image' => '', 'excerpt' => []]],
+            ];
             return $payload;
         },
         'negative product total' => static function (array $payload): array {
@@ -399,6 +468,47 @@ ysss_test('requested cache hits require a complete self-consistent canonical pay
         ysss_assert_same(1, count(ysss_pagination_count_sql($db)), "{$label} cache skipped rebuild COUNT");
         ysss_assert_same(1, count(ysss_pagination_row_sql($db)), "{$label} cache skipped row rebuild");
     }
+});
+
+ysss_test('malformed current-version product cache is rebuilt before real render', static function (): void {
+    $db = ysss_pagination_fixture(1);
+    $settings = YSSsSettings::all();
+    $key = ysss_pagination_cache_key('nova', 1, $settings);
+    YSSsWpFake::$transients[$key] = [
+        'q' => 'nova',
+        'products_total' => 1,
+        'page' => 1,
+        'per_page' => 24,
+        'total_pages' => 1,
+        'groups' => [[
+            'type' => 'products',
+            'label' => '商品',
+            'total' => 1,
+            'items' => [[]],
+        ]],
+        'content_types' => ['products'],
+    ];
+    $_GET['ys_ec_search'] = 'nova';
+    $_GET['ys_ss_page'] = '1';
+
+    $warnings = [];
+    set_error_handler(static function (int $severity, string $message) use (&$warnings): bool {
+        $warnings[] = $message;
+        return true;
+    });
+    try {
+        $html = YSSsResultsPage::render();
+    } finally {
+        restore_error_handler();
+    }
+
+    ysss_assert_same([], $warnings, 'Malformed cached item reached the renderer');
+    ysss_assert_contains('Nova Product 1', $html, 'Malformed cache was not replaced by SQL-backed payload');
+    ysss_assert_same(1, count(ysss_pagination_count_sql($db)), 'Malformed cache skipped repair COUNT');
+    ysss_assert_same(1, count(ysss_pagination_row_sql($db)), 'Malformed cache skipped repair row SELECT');
+    ysss_assert_same(1, count(YSSsWpFake::$transientSets), 'Repaired canonical payload was not published exactly once');
+    ysss_assert_same($key, YSSsWpFake::$transientSets[0]['key'] ?? null);
+    ysss_assert_same('Nova Product 1', YSSsWpFake::$transientSets[0]['value']['groups'][0]['items'][0]['title'] ?? null);
 });
 
 ysss_test('non-scalar page ingress renders page one without warnings', static function (): void {
