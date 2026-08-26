@@ -4,7 +4,7 @@ const { createHarness, assert, runTests } = require('../support/front-js-harness
 
 function threeResults() {
 	return {
-		q: 'nova', total: 3, log_receipt: 'receipt-nova', view_all: '/shop/?q=nova',
+		q: 'nova', total: 3, products_total: 3, log_receipt: 'receipt-nova', view_all: '/shop/?q=nova',
 		groups: [{
 			type: 'products', label: 'results', total: 3,
 			items: [
@@ -92,7 +92,7 @@ runTests([
 		h.popup.input.value = 'zero';
 		h.dispatch(h.popup.input, 'input');
 		h.advanceTimers(250);
-		await h.resolveJson(1, { q: 'zero', total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
+		await h.resolveJson(1, { q: 'zero', total: 0, products_total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
 		await h.resolveJson(0, { items: [{ term: 'fallback-chip' }] });
 		const focusables = h.popup.root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])');
 		assert(4 === focusables.length, 'popup focus cycle did not include the production fallback chip');

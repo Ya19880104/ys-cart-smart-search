@@ -71,6 +71,7 @@ ysss_test('query rejects lossy markup before product search', static function ()
     ysss_assert_true($response instanceof WP_REST_Response, 'Expected neutral REST response');
     $data = $response->get_data();
     ysss_assert_same('', $data['q'] ?? null, 'Blocked response must not reflect a sanitized fragment');
+    ysss_assert_same(0, $data['products_total'] ?? null, 'Blocked response must expose zero product authority');
     ysss_assert_same('', $data['view_all'] ?? null, 'Blocked response must not build a query URL');
     ysss_assert_same('', $data['log_receipt'] ?? null, 'Blocked response must not issue an analytics receipt');
     $productSql = array_filter(
@@ -117,6 +118,7 @@ ysss_test('neutral result never reflects blocked payload or consults settings', 
     ysss_assert_same([
         'q' => '',
         'total' => 0,
+        'products_total' => 0,
         'groups' => [],
         'content_types' => [],
         'view_all' => '',

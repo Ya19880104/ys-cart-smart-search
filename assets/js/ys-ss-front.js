@@ -325,11 +325,14 @@
 				state = controller(form);
 				if (state.activeRequest === requestController) { state.activeRequest = null; }
 				if (data && data.q && data.log_receipt) {
+					var productsTotal = Number(data.products_total);
+					if (!Number.isFinite(productsTotal) || productsTotal < 0) { productsTotal = 0; }
 					state.proof = {
 						input: query,
 						query: data.q,
 						receipt: data.log_receipt,
-						total: Math.max(0, Number(data.total) || 0)
+						total: Math.max(0, Number(data.total) || 0),
+						productsTotal: productsTotal
 					};
 					form._ysSsLogProof = state.proof;
 				}
@@ -413,7 +416,7 @@
 			if (!query) { return; }
 			var proof = controller(form).proof;
 			if (!proof || proof.input !== query || !proof.receipt) { return; }
-			if (proof.total > 0) { recentPush(query); }
+			if (proof.productsTotal > 0) { recentPush(query); }
 			if (CFG.resultsMode !== 'page') { logQuery(proof.query, proof.receipt, sourceOf(form)); }
 		});
 

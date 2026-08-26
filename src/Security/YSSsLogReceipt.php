@@ -3,6 +3,8 @@
  * 短效 server-signed analytics receipt。
  *
  * 公開 `/log` 不再信任 client total；只接受 `/query` 對同一 query／visitor 簽發的 claims。
+ * v1 claim `t`／驗證結果 `total` 代表 server-derived product-positive count，
+ * 而不是公開搜尋回應的 aggregate display total。
  *
  * @package YangSheep\SmartSearch
  */
@@ -22,6 +24,9 @@ final class YSSsLogReceipt {
 	private const MAX_TOKEN_BYTES   = 1024;
 	private const MAX_PAYLOAD_BYTES = 768;
 
+	/**
+	 * @param int $total Server-derived product-positive count stored in v1 claim `t`.
+	 */
 	public static function issue( string $query, int $total, string $content_types, string $visitor_hash, ?int $now = null ): string {
 		$now          = $now ?? time();
 		$query        = self::bounded_query( $query );

@@ -31,6 +31,7 @@ use YangSheep\SmartSearch\Api\YSSsPublicController;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Security\YSSsLogReceipt;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
+use YangSheep\SmartSearch\Services\YSSsSearchService;
 
 foreach ([
     'src/Security/YSSsInjectionGuard.php',
@@ -286,6 +287,7 @@ ysss_test('query signs the non-zero total produced by the server search', static
     $data = $response->get_data();
     ysss_assert_same('nova', $data['q'] ?? null);
     ysss_assert_same(2, $data['total'] ?? null, 'Server search fixture did not produce the expected non-zero total');
+    ysss_assert_same(2, $data['products_total'] ?? null, 'Product-positive total did not reflect the visible product group');
     ysss_assert_true(is_string($data['log_receipt'] ?? null) && '' !== $data['log_receipt'], 'Valid query did not receive a receipt');
     $visitor = YSSsRateLimiter::visitor_hash();
     $claims = YSSsLogReceipt::verify($data['log_receipt'], 'nova', $visitor);
@@ -295,6 +297,74 @@ ysss_test('query signs the non-zero total produced by the server search', static
         'content_types' => 'products',
         'visitor_hash' => $visitor,
     ], $claims, 'Receipt did not bind the complete server-computed result');
+});
+
+ysss_test('category and post only query keeps display total but signs zero product authority', static function () use ($receiptClaims): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [
+        [
+            'type' => 'categories',
+            'label' => 'Categories',
+            'total' => 3,
+            'items' => [['title' => 'Nova category', 'url' => '/category/nova']],
+        ],
+        [
+            'type' => 'posts',
+            'label' => 'Posts',
+            'total' => 2,
+            'items' => [['title' => 'Nova guide', 'url' => '/nova-guide']],
+        ],
+    ]);
+
+    $controller = new YSSsPublicController();
+    $response = $controller->query(new WP_REST_Request(['q' => 'Nova']));
+    ysss_assert_true($response instanceof WP_REST_Response);
+    $data = $response->get_data();
+    ysss_assert_same(5, $data['total'] ?? null, 'Category/post display total was lost');
+    $receipt = (string) ($data['log_receipt'] ?? '');
+    $visitor = YSSsRateLimiter::visitor_hash();
+    ysss_assert_same(0, YSSsLogReceipt::verify($receipt, 'nova', $visitor)['total'] ?? null, 'Aggregate display total was signed as product authority');
+    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'iat', 'exp'], array_keys($receiptClaims($receipt)), 'Receipt v1 wire keys changed');
+    ysss_assert_same(0, $data['products_total'] ?? null, 'Category/post-only results gained product authority');
+
+    $logged = $controller->log(new WP_REST_Request([
+        'q' => 'nova',
+        'receipt' => $receipt,
+        'source' => 'bar',
+    ]));
+    ysss_assert_same(['ok' => true], $logged->get_data());
+    ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Recognizable zero-product analytics was not recorded');
+    ysss_assert_same(0, $GLOBALS['wpdb']->inserts[0]['data']['results_total'] ?? null, 'Zero-product analytics stored the aggregate display total');
+    ysss_assert_same(0, $GLOBALS['wpdb']->inserts[0]['data']['has_results'] ?? null, 'Zero-product analytics became suggestion-positive');
+});
+
+ysss_test('product plus category query signs only the product contribution', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [
+        [
+            'type' => 'products',
+            'label' => 'Products',
+            'total' => 2,
+            'items' => [['title' => 'Nova product', 'url' => '/product/nova']],
+        ],
+        [
+            'type' => 'categories',
+            'label' => 'Categories',
+            'total' => 5,
+            'items' => [['title' => 'Nova category', 'url' => '/category/nova']],
+        ],
+    ]);
+
+    $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => 'Nova']));
+    $data = $response->get_data();
+    ysss_assert_same(7, $data['total'] ?? null, 'Aggregate display total changed');
+    ysss_assert_same(2, $data['products_total'] ?? null, 'Product contribution was not separated');
+    $claims = YSSsLogReceipt::verify(
+        (string) ($data['log_receipt'] ?? ''),
+        'nova',
+        YSSsRateLimiter::visitor_hash()
+    );
+    ysss_assert_same(2, $claims['total'] ?? null, 'Category count leaked into signed product authority');
 });
 
 ysss_test('query receipt matches filter-final groups and preserves searched scopes', static function (): void {
@@ -315,6 +385,7 @@ ysss_test('query receipt matches filter-final groups and preserves searched scop
     $data = $response->get_data();
     ysss_assert_same([], $data['groups'] ?? null);
     ysss_assert_same(0, $data['total'] ?? null, 'Total was not recomputed from filter-final groups');
+    ysss_assert_same(0, $data['products_total'] ?? null, 'Removing the product group did not revoke product authority');
     $visitor = YSSsRateLimiter::visitor_hash();
     $claims = YSSsLogReceipt::verify(
         (string) ($data['log_receipt'] ?? ''),
@@ -329,6 +400,74 @@ ysss_test('query receipt matches filter-final groups and preserves searched scop
     ], $claims, 'Receipt did not preserve the authoritative searched scopes and final total');
 });
 
+ysss_test('filter-added visible exact product group grants product authority', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
+        'type' => 'products',
+        'label' => 'Trusted products',
+        'total' => 4,
+        'items' => [['title' => 'Injected by trusted filter', 'url' => '/product/trusted']],
+    ]]);
+
+    $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => 'Nova']));
+    $data = $response->get_data();
+    ysss_assert_same(4, $data['total'] ?? null);
+    ysss_assert_same(4, $data['products_total'] ?? null, 'Visible exact-type filtered product group did not grant authority');
+    $claims = YSSsLogReceipt::verify(
+        (string) ($data['log_receipt'] ?? ''),
+        'nova',
+        YSSsRateLimiter::visitor_hash()
+    );
+    ysss_assert_same(4, $claims['total'] ?? null);
+});
+
+ysss_test('empty non-array and wrong-case product groups cannot grant product authority', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [
+        ['type' => 'products', 'total' => 99, 'items' => []],
+        ['type' => 'products', 'total' => 8, 'items' => 'not-an-array'],
+        ['type' => 'Products', 'total' => 7, 'items' => [['title' => 'Wrong case']]],
+        ['type' => 'categories', 'total' => 1, 'items' => [['title' => 'Visible category']]],
+    ]);
+
+    $result = YSSsSearchService::search('Nova');
+    ysss_assert_same(0, $result['products_total'] ?? null, 'Malformed or wrong-case groups granted product authority');
+});
+
+ysss_test('multiple visible product groups sum item floors after the final filter', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [
+        ['type' => 'products', 'total' => 1, 'items' => [['title' => 'A'], ['title' => 'B'], ['title' => 'C']]],
+        ['type' => 'products', 'total' => -4, 'items' => [['title' => 'D'], ['title' => 'E']]],
+        'not-a-group',
+        ['type' => 'products', 'total' => 4, 'items' => [['title' => 'F']]],
+        ['type' => 'categories', 'total' => 6, 'items' => [['title' => 'Category']]],
+    ]);
+
+    $result = YSSsSearchService::search('Nova');
+    ysss_assert_same(11, $result['total'] ?? null, 'Existing aggregate total behavior changed');
+    ysss_assert_same(9, $result['products_total'] ?? null, 'Product groups did not sum max(item count, nonnegative total)');
+});
+
+ysss_test('query bounds aggregate and product totals independently', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [
+        ['type' => 'products', 'total' => 7, 'items' => [['title' => 'Product']]],
+        ['type' => 'categories', 'total' => 2000000, 'items' => [['title' => 'Category']]],
+    ]);
+
+    $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => 'Nova']));
+    $data = $response->get_data();
+    ysss_assert_same(1000000, $data['total'] ?? null, 'Aggregate total was not independently bounded');
+    ysss_assert_same(7, $data['products_total'] ?? null, 'Aggregate bound overwrote product authority');
+    $claims = YSSsLogReceipt::verify(
+        (string) ($data['log_receipt'] ?? ''),
+        'nova',
+        YSSsRateLimiter::visitor_hash()
+    );
+    ysss_assert_same(7, $claims['total'] ?? null, 'Receipt did not bind the independently bounded product total');
+});
+
 ysss_test('query response and receipt share the same total upper bound', static function (): void {
     YSSsWpFake::reset();
     add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
@@ -340,6 +479,7 @@ ysss_test('query response and receipt share the same total upper bound', static 
     ysss_assert_true($response instanceof WP_REST_Response);
     $data = $response->get_data();
     ysss_assert_same(1000000, $data['total'] ?? null, 'Public total exceeded the signed claim bound');
+    ysss_assert_same(1000000, $data['products_total'] ?? null, 'Product total exceeded its signed claim bound');
     $claims = YSSsLogReceipt::verify(
         (string) ($data['log_receipt'] ?? ''),
         'nova',

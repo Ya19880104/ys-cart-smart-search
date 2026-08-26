@@ -8,6 +8,7 @@ function result(query, label, receipt, items = [{ title: label, url: '/product/'
 	return {
 		q: query,
 		total: items.length,
+		products_total: items.length,
 		groups: [{ type: 'products', label, items, total: items.length }],
 		view_all: '/shop/?q=' + query,
 		log_receipt: receipt,
@@ -102,7 +103,7 @@ runTests([
 		parts.input.value = 'nothing';
 		h.dispatch(parts.input, 'input');
 		h.advanceTimers(250);
-		await h.resolveJson(0, { q: 'nothing', total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
+		await h.resolveJson(0, { q: 'nothing', total: 0, products_total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
 		assert(h.pendingFetches[1] && h.pendingFetches[1].url.endsWith('/suggest'), 'cold zero result did not load suggestions');
 		await h.resolveJson(1, { items: [{ term: 'popular-nova' }] });
 		assert(parts.panel.textContent.includes('popular-nova'), 'cold zero result did not append fallback chips');
@@ -113,7 +114,7 @@ runTests([
 		parts.input.value = 'nothing';
 		h.dispatch(parts.input, 'input');
 		h.advanceTimers(250);
-		await h.resolveJson(0, { q: 'nothing', total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
+		await h.resolveJson(0, { q: 'nothing', total: 0, products_total: 0, groups: [], view_all: '', log_receipt: 'receipt-zero' });
 		assert(h.pendingFetches[1] && h.pendingFetches[1].url.endsWith('/suggest'), 'cold zero result did not start fallback request');
 		parts.input.value = 'next';
 		h.dispatch(parts.input, 'input');

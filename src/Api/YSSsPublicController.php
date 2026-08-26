@@ -71,10 +71,11 @@ final class YSSsPublicController {
 		) );
 		$now     = time();
 		$visitor = YSSsRateLimiter::visitor_hash_at( $now );
-		$result['total'] = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['total'] ?? 0 ) ) );
+		$result['total']          = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['total'] ?? 0 ) ) );
+		$result['products_total'] = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['products_total'] ?? 0 ) ) );
 		$result['log_receipt'] = YSSsLogReceipt::issue(
 			(string) ( $result['q'] ?? '' ),
-			(int) ( $result['total'] ?? 0 ),
+			(int) ( $result['products_total'] ?? 0 ),
 			implode( ',', array_values( array_unique( $types ) ) ),
 			$visitor,
 			$now

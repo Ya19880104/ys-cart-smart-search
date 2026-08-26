@@ -22,7 +22,7 @@ defined( 'ABSPATH' ) || exit;
 final class YSSsSearchService {
 
 	/**
-	 * @return array<string,mixed> { q, total, groups: [ {type,label,total,items[]} ], content_types: string[] }
+	 * @return array<string,mixed> { q, total, products_total, groups: [ {type,label,total,items[]} ], content_types: string[] }
 	 */
 	public static function search( string $q ): array {
 		$settings = YSSsSettings::all();
@@ -57,20 +57,31 @@ final class YSSsSearchService {
 		 * @param string $norm
 		 */
 		$groups = (array) apply_filters( 'ys_ss_result_groups', $groups, $norm );
-		$total  = 0;
+		$total          = 0;
+		$products_total = 0;
 		foreach ( $groups as $group ) {
 			if ( is_array( $group ) && ! empty( $group['items'] ) ) {
 				$total += max( 0, (int) ( $group['total'] ?? 0 ) );
 			}
+			if ( is_array( $group )
+				&& 'products' === ( $group['type'] ?? null )
+				&& is_array( $group['items'] ?? null )
+				&& ! empty( $group['items'] ) ) {
+				$products_total += max(
+					count( $group['items'] ),
+					max( 0, (int) ( $group['total'] ?? 0 ) )
+				);
+			}
 		}
 
 		return [
-			'q'             => $norm,
-			'total'         => $total,
-			'groups'        => $groups,
-			'content_types' => array_values( array_unique( $searched_types ) ),
-			'view_all'      => YSSsResultsPage::search_url( $norm ),
-			'log_receipt'   => '',
+			'q'              => $norm,
+			'total'          => $total,
+			'products_total' => $products_total,
+			'groups'         => $groups,
+			'content_types'  => array_values( array_unique( $searched_types ) ),
+			'view_all'       => YSSsResultsPage::search_url( $norm ),
+			'log_receipt'    => '',
 		];
 	}
 
@@ -81,12 +92,13 @@ final class YSSsSearchService {
 	 */
 	public static function empty_result(): array {
 		return [
-			'q'             => '',
-			'total'         => 0,
-			'groups'        => [],
-			'content_types' => [],
-			'view_all'      => '',
-			'log_receipt'   => '',
+			'q'              => '',
+			'total'          => 0,
+			'products_total' => 0,
+			'groups'         => [],
+			'content_types'  => [],
+			'view_all'       => '',
+			'log_receipt'    => '',
 		];
 	}
 
