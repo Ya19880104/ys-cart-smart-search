@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.5.3] - 2026-08-26 — 搜尋互動與資料一致性
+
+### Changed / Fixed
+
+- 每個前台搜尋表單改由單一互動狀態管理競態、取消、載入、錯誤與結果；過期回應不再覆蓋
+  新輸入，HTTP／JSON／網路失敗只顯示固定安全訊息，也不留下舊結果、proof、最近搜尋或分析事件。
+- 搜尋框與結果面板補齊 combobox／listbox 鍵盤操作與狀態，彈窗支援焦點圈、Escape 關閉，
+  並在關閉後把焦點還給實際開啟它的按鈕。
+- 手動關鍵字新增／編輯保留通過安全判定的精確字串（含 `C++ <vector> 入門`）；資料庫失敗、
+  無效輸入與後台競態均回固定且如實的狀態，刪除、排序、啟停與設定操作不再假報成功。
+- B 模式先取得商品總數再解析最後可見頁，分類／文章與商品共用 canonical page；快取鍵加入版本
+  並只寫 resolved page，避免深分頁空結果、過大 OFFSET 與舊版 cache 污染。
+- 分析的 SKU／ISBN／EAN／UPC／MPN／型號／料號辨識改為 token-local byte span；只豁免完整位於
+  識別片段內的 token，旁邊無關的亂數或已知參數仍會被分析入口忽略。
+- 熱門建議失效加入 generation tombstone 與發布前重驗：無法安全輪替時 fail closed，新鮮計算
+  不讀寫舊 cache；已提交的後台變更仍回成功，但以固定警示誠實標示 cache 可能延遲更新。
+- 分析 receipt 的訪客身分改綁簽發時間；跨 UTC 午夜但仍在有效期內的同一 receipt 維持同一
+  去重身分，且線上 wire version、HMAC、期限與舊 v1 receipt 相容性不變。
+- 最近搜尋、自動熱門詞與 B 模式分析只以實際商品數為正向依據；分類／文章仍可呈現及留下
+  可辨識的零商品分析，但不再進入商品搜尋記憶。
+
+### Compatibility / Release Boundary
+
+- 本版沒有資料庫 schema 變更，也沒有 public REST URL 變更。
+- 本次候選僅準備本機與授權測試站驗收；未執行 Hub、S3 或 production 動作。
+
 ## [1.5.2] - 2026-08-26 — 搜尋入口與分析資料完整性收斂
 
 ### Security / Integrity

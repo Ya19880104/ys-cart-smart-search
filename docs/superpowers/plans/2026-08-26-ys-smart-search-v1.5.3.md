@@ -666,7 +666,7 @@ Set the plugin header and constant to `1.5.3`. Add the first CHANGELOG section:
 ## [1.5.3] - 2026-08-26 — 搜尋互動與資料一致性
 ```
 
-Document the seven shipped contracts and explicitly state no schema or public REST URL change.
+Document the eight shipped contracts (including the later product-positive-memory addendum) and explicitly state no schema or public REST URL change.
 
 - [ ] **Step 3: Run metadata GREEN**
 
