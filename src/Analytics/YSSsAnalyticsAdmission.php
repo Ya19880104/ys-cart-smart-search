@@ -82,11 +82,19 @@ final class YSSsAnalyticsAdmission {
 		for ( $round = 0; $round < 3 && $frontier; $round++ ) {
 			$next = [];
 			foreach ( $frontier as $candidate ) {
-				foreach ( [
+				$transforms = [
 					rawurldecode( $candidate ),
 					html_entity_decode( $candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
 					YSSsText::fold_fullwidth_ascii( $candidate ),
-				] as $decoded ) {
+				];
+				if ( class_exists( '\\Normalizer' ) ) {
+					$normalized = \Normalizer::normalize( $candidate, \Normalizer::FORM_KC );
+					if ( is_string( $normalized ) ) {
+						$transforms[] = $normalized;
+					}
+				}
+
+				foreach ( $transforms as $decoded ) {
 					if ( $decoded === $candidate || 1 !== preg_match( '//u', $decoded )
 						|| in_array( $decoded, $candidates, true ) ) {
 						continue;

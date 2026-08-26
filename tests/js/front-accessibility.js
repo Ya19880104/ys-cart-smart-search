@@ -17,6 +17,26 @@ function threeResults() {
 }
 
 runTests([
+	['input and listbox keep synchronized busy state through query error and close', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		input.value = 'error-query';
+		input.focus();
+		assert('true' === input.getAttribute('aria-busy'), 'current query did not mark input busy');
+		assert('true' === panel.getAttribute('aria-busy'), 'current query did not mark listbox busy');
+		await h.resolveJson(0, { message: 'private detail' }, 500);
+		assert('false' === input.getAttribute('aria-busy'), 'query error did not clear input busy');
+		assert('false' === panel.getAttribute('aria-busy'), 'query error did not clear listbox busy');
+
+		input.value = 'close-query';
+		h.dispatch(input, 'input');
+		h.advanceTimers(250);
+		assert('true' === input.getAttribute('aria-busy'), 'second current query did not mark input busy');
+		assert('true' === panel.getAttribute('aria-busy'), 'second current query did not mark listbox busy');
+		h.document.body.click();
+		assert('false' === input.getAttribute('aria-busy'), 'closed query did not clear input busy');
+		assert('false' === panel.getAttribute('aria-busy'), 'closed query did not clear listbox busy');
+	}],
 	['combobox arrows retain input focus and Enter activates only current option', async () => {
 		const h = createHarness();
 		const { input, panel } = h.forms[0];

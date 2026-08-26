@@ -205,6 +205,71 @@ ysss_test('durable final marker overrides an earlier add exception after persist
     ysss_assert_same([], YSSsWpFake::$optionUpdateCalls, 'Add exception unexpectedly attempted generation rotation');
 });
 
+ysss_test('false marker add with strict readback mismatch never attempts generation rotation', static function (): void {
+    YSSsWpFake::reset();
+    $generation = 'false-marker';
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
+    YSSsWpFake::$addOptionHandler = static fn(string $key, mixed $value, string $deprecated, mixed $autoload): bool => false;
+
+    $status = YSSsSuggestService::invalidate();
+
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_FAILED, $status);
+    ysss_assert_same($generation, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null);
+    ysss_assert_same([], array_values(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    )), 'Generation was written without durable marker authority');
+});
+
+ysss_test('false marker add may rotate only when an identical marker already exists', static function (): void {
+    YSSsWpFake::reset();
+    $generation = 'existing-marker';
+    $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
+    YSSsWpFake::$options[$marker] = $generation;
+
+    $status = YSSsSuggestService::invalidate();
+
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_ROTATED, $status);
+    ysss_assert_same(1, count(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    )));
+});
+
+ysss_test('failed marker authority cannot promote an interleaved stale payload into the current generation', static function (): void {
+    YSSsWpFake::reset();
+    $generation = 'interleave-old';
+    $candidate = str_repeat('ab', 16);
+    YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
+    YSSsWpFake::$addOptionHandler = static fn(string $key, mixed $value, string $deprecated, mixed $autoload): bool => false;
+    YSSsWpFake::$randomBytesHandler = static fn(int $length): string => str_repeat("\xAB", $length);
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload) use ($candidate): bool {
+        YSSsWpFake::$options[$key] = $value;
+        if ('ys_ss_suggest_cache_generation' === $key && $candidate === $value) {
+            YSSsWpFake::$transients['ys_ss_suggest_cache_v' . $candidate] = [
+                'count' => 1,
+                'recent_enabled' => true,
+                'items' => [['term' => 'interleaved-stale', 'source' => 'manual']],
+            ];
+        }
+        return true;
+    };
+
+    $status = YSSsSuggestService::invalidate();
+    $GLOBALS['wpdb']->columnSets = [[], []];
+    add_filter('ys_ss_suggestions', static fn(array $items): array => [['term' => 'fresh-after-failed-authority', 'source' => 'external']]);
+    $payload = YSSsSuggestService::suggestions();
+
+    ysss_assert_same([['term' => 'fresh-after-failed-authority', 'source' => 'external']], $payload['items'] ?? null, 'A falsely authorized rotation exposed interleaved stale cache bytes');
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_FAILED, $status);
+    ysss_assert_same($generation, YSSsWpFake::$options['ys_ss_suggest_cache_generation'] ?? null);
+    ysss_assert_same([], array_values(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    )), 'Failed marker authority still attempted a generation write');
+});
+
 ysss_test('total authority persistence failure returns failed while still deleting old caches', static function (): void {
     YSSsWpFake::reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old9';

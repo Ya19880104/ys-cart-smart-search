@@ -22,6 +22,7 @@ ysss_test('rendered bars and popup expose unique matched combobox and listbox co
     foreach ($panels[0] as $panel) {
         ysss_assert_contains('role="listbox"', $panel);
         ysss_assert_contains('aria-live="polite"', $panel);
+        ysss_assert_contains('aria-busy="false"', $panel);
         ysss_assert_true(1 === preg_match('/\bid="([^"]+)"/u', $panel, $id), 'Panel is missing an ID');
         $panelIds[] = $id[1];
     }
@@ -30,6 +31,7 @@ ysss_test('rendered bars and popup expose unique matched combobox and listbox co
         ysss_assert_contains('role="combobox"', $input);
         ysss_assert_contains('aria-autocomplete="list"', $input);
         ysss_assert_contains('aria-expanded="false"', $input);
+        ysss_assert_contains('aria-busy="false"', $input);
         ysss_assert_contains('aria-controls="' . $panelIds[$index] . '"', $input, 'Input aria-controls does not match its panel');
     }
 });

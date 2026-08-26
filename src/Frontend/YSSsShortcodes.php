@@ -144,11 +144,12 @@ final class YSSsShortcodes {
 					placeholder="<?php echo esc_attr( (string) $atts['placeholder'] ); ?>"
 					autocomplete="off" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>"
 					role="combobox" aria-autocomplete="list" aria-expanded="false"
+					aria-busy="false"
 					aria-controls="<?php echo esc_attr( $panel_id ); ?>">
 				<button type="submit" class="ys-ss-submit" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 				</button>
-				<div class="ys-ss-panel" id="<?php echo esc_attr( $panel_id ); ?>" role="listbox" aria-live="polite" hidden></div>
+				<div class="ys-ss-panel" id="<?php echo esc_attr( $panel_id ); ?>" role="listbox" aria-live="polite" aria-busy="false" hidden></div>
 			</div>
 		</form>
 		<?php
@@ -192,11 +193,12 @@ final class YSSsShortcodes {
 							placeholder="<?php esc_attr_e( '搜尋商品…', 'ys-cart-smart-search' ); ?>"
 							autocomplete="off" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>"
 							role="combobox" aria-autocomplete="list" aria-expanded="false"
+							aria-busy="false"
 							aria-controls="<?php echo esc_attr( $panel_id ); ?>">
 						<button type="submit" class="ys-ss-submit" aria-label="<?php esc_attr_e( '搜尋', 'ys-cart-smart-search' ); ?>">
 							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 						</button>
-						<div class="ys-ss-panel" id="<?php echo esc_attr( $panel_id ); ?>" role="listbox" aria-live="polite" hidden></div>
+						<div class="ys-ss-panel" id="<?php echo esc_attr( $panel_id ); ?>" role="listbox" aria-live="polite" aria-busy="false" hidden></div>
 					</div>
 				</form>
 			</div>

@@ -13,6 +13,7 @@ foreach ([
     'src/Database/YSSsQueryRepository.php',
     'src/Database/YSSsKeywordRepository.php',
     'src/Services/YSSsSuggestService.php',
+    'src/Frontend/YSSsResultsPage.php',
     'src/Api/YSSsAdminController.php',
 ] as $source) {
     ysss_require_source($source);
@@ -203,6 +204,79 @@ ysss_test('idempotent settings save succeeds only when normalized readback match
         static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
     ));
     ysss_assert_same(1, count($generationWrites), 'Matching settings readback did not invalidate exactly once');
+});
+
+ysss_test('first page-mode save settles on the synchronously provisioned authoritative page', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$options[YSSsSettings::OPTION] = YSSsSettings::all();
+    YSSsWpFake::$posts[731] = new WP_Post(731, 'page', 'publish', '[ys_ss_search_results]');
+    $provisioned = false;
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload) use (&$provisioned): bool {
+        YSSsWpFake::$options[$key] = $value;
+        if (YSSsSettings::OPTION === $key
+            && !$provisioned
+            && 'page' === ($value['results_mode'] ?? null)
+            && 0 === ($value['results_page_id'] ?? null)) {
+            $provisioned = true;
+            YSSsSettings::update(['results_page_id' => 731]);
+        }
+        return true;
+    };
+
+    $result = (new YSSsAdminController())->settings_save(new WP_REST_Request(['results_mode' => 'page']));
+
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_true($provisioned, 'The fixture did not execute synchronous nested provisioning');
+    ysss_assert_same('page', $result->get_data()['settings']['results_mode'] ?? null);
+    ysss_assert_same(731, $result->get_data()['settings']['results_page_id'] ?? null);
+    ysss_assert_same(731, YSSsSettings::all()['results_page_id'] ?? null, 'Response was not final storage authority');
+    $generationWrites = array_values(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    ));
+    ysss_assert_same(1, count($generationWrites), 'Nested page provisioning invalidated before final settlement or more than once');
+});
+
+ysss_test('page-mode save fails closed when final storage has no contract-complete result page', static function (): void {
+    YSSsWpFake::reset();
+    YSSsWpFake::$options[YSSsSettings::OPTION] = YSSsSettings::all();
+
+    $result = (new YSSsAdminController())->settings_save(new WP_REST_Request(['results_mode' => 'page']));
+
+    ysss_assert_true($result instanceof WP_Error);
+    ysss_assert_same('ys_ss_settings_write_failed', $result->get_error_code());
+    ysss_assert_same(500, $result->get_error_data()['status'] ?? null);
+    ysss_assert_same([], YSSsWpFake::$optionAdds, 'Contract-incomplete settings invalidated suggestions');
+    $generationWrites = array_values(array_filter(
+        YSSsWpFake::$optionUpdateCalls,
+        static fn(array $call): bool => 'ys_ss_suggest_cache_generation' === $call['key']
+    ));
+    ysss_assert_same([], $generationWrites, 'Contract-incomplete settings rotated cache');
+});
+
+ysss_test('idempotent page-mode save with a valid page remains successful', static function (): void {
+    YSSsWpFake::reset();
+    $stored = YSSsSettings::all();
+    $stored['results_mode'] = 'page';
+    $stored['results_page_id'] = 732;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $stored;
+    YSSsWpFake::$posts[732] = new WP_Post(732, 'page', 'publish', '[ys_ss_search_results]');
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
+        if (YSSsSettings::OPTION === $key) {
+            return false;
+        }
+        YSSsWpFake::$options[$key] = $value;
+        return true;
+    };
+
+    $result = (new YSSsAdminController())->settings_save(new WP_REST_Request([
+        'results_mode' => 'page',
+        'results_page_id' => 732,
+    ]));
+
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(732, $result->get_data()['settings']['results_page_id'] ?? null);
+    ysss_assert_same(YSSsSuggestService::INVALIDATION_ROTATED, $result->get_data()['cache_status'] ?? null);
 });
 
 ysss_test('mismatching settings readback returns fixed 500 with zero invalidation', static function (): void {

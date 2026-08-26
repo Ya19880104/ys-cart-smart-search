@@ -136,14 +136,14 @@ final class YSSsSuggestService {
 		$captured     = $state['generation'];
 		$captured_ok  = $state['cacheable'];
 		$marker_name  = $captured_ok ? self::tombstone_name( $captured ) : '';
-		$may_rotate   = true;
+		$may_rotate   = ! $captured_ok;
 
 		if ( $captured_ok ) {
 			try {
 				add_option( $marker_name, $captured, '', false );
-				// Always verify the stored bytes. add_option(false) is authoritative only when an
-				// identical marker already exists.
-				self::is_tombstoned( $captured );
+				// Always verify the stored bytes. Neither add_option(true) nor add_option(false)
+				// authorizes rotation unless the exact captured generation is observable now.
+				$may_rotate = self::is_tombstoned( $captured );
 			} catch ( \Throwable $error ) {
 				// The final strict readback remains authoritative even when the storage adapter
 				// throws after persisting. Do not risk rotating without an observed pre-write marker.

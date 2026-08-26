@@ -66,6 +66,28 @@ ysss_test('analytics admission rejects attacks known parameters and opaque machi
     ysss_assert_same('reject_machine_token', YSSsAnalyticsAdmission::classify('qwertyuiopasdfghjklzxcvb', 0));
 });
 
+if (class_exists('\\Normalizer')) {
+    $nfkc_noise_cases = [
+        ['known parameter at zero results', '𝐮𝐭𝐦_𝐬𝐨𝐮𝐫𝐜𝐞=𝐛𝐨𝐭', 0, YSSsAnalyticsAdmission::REJECT_KNOWN_PARAMETER],
+        ['known parameter at positive results', '𝐮𝐭𝐦_𝐬𝐨𝐮𝐫𝐜𝐞=𝐛𝐨𝐭', 3, YSSsAnalyticsAdmission::REJECT_KNOWN_PARAMETER],
+        ['single opaque token at zero results', '𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗𝟎𝟏𝟐𝟑𝟒𝟓', 0, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN],
+        ['two opaque tokens at positive results', '𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗𝟎𝟏𝟐𝟑𝟒𝟓 𝟗𝟖𝟕𝟔𝟓𝟒𝟑𝟐𝟏𝟎𝟗𝟖𝟕𝟔𝟓𝟒', 4, YSSsAnalyticsAdmission::REJECT_MACHINE_TOKEN],
+    ];
+
+    foreach ($nfkc_noise_cases as $index => [$label, $query, $total, $expected]) {
+        ysss_test("analytics admission applies NFKC to {$label}", static function () use ($index, $label, $query, $total, $expected): void {
+            ysss_assert_same($expected, YSSsAnalyticsAdmission::classify($query, $total), "NFKC fixture {$index} admitted {$label}");
+        });
+
+        ysss_test("analytics repository rejects NFKC {$label}", static function () use ($index, $label, $query, $total): void {
+            YSSsWpFake::reset();
+            YSSsQueryRepository::log($query, $total, 'products', 'bar', "nfkc-noise-{$index}");
+            ysss_assert_same([], $GLOBALS['wpdb']->inserts, "NFKC fixture {$index} inserted analytics for {$label}");
+            ysss_assert_same([], $GLOBALS['wpdb']->queries, "NFKC fixture {$index} reached a database query for {$label}");
+        });
+    }
+}
+
 $token_local_cases = [
     ['SKU-9F8A7B6C5D4E3F2A', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO, true],
     ['SKU-9F8A7B6C5D4E3F2A MPN-A1B2C3D4E5F6G7H8', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO, true],

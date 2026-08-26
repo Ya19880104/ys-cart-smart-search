@@ -96,10 +96,19 @@
 				proof: null,
 				activeRequest: null,
 				activeIndex: -1,
-				settleTimer: null
+				settleTimer: null,
+				suppressFocus: false
 			};
 		}
 		return form._ysSsController;
+	}
+
+	function setBusy(form, busy) {
+		var input = form.querySelector('.ys-ss-input');
+		var panel = form.querySelector('.ys-ss-panel');
+		var value = busy ? 'true' : 'false';
+		if (input) { input.setAttribute('aria-busy', value); }
+		if (panel) { panel.setAttribute('aria-busy', value); }
 	}
 
 	function beginInteraction(form, mode) {
@@ -152,6 +161,11 @@
 		var state = controller(form);
 		if (!input || !panel) { return; }
 
+		if (payload && payload.busyOnly) {
+			setBusy(form, !!payload.busy);
+			return;
+		}
+
 		if (payload && payload.selectionOnly) {
 			var currentItems = selectableItems(panel);
 			Array.prototype.forEach.call(currentItems, function (item, index) {
@@ -169,12 +183,14 @@
 
 		panel.textContent = '';
 		input.removeAttribute('aria-activedescendant');
-		input.setAttribute('aria-busy', 'loading' === mode ? 'true' : 'false');
+		setBusy(form, 'loading' === mode);
 		var visible = false;
 
-		function startChipSearch(term) {
+		function startChipSearch(term, event) {
+			if (event) { event._ysSsActivationOwner = form; }
 			input.value = term;
-			input.focus();
+			state.suppressFocus = true;
+			try { input.focus(); } finally { state.suppressFocus = false; }
 			var token = beginInteraction(form, 'query');
 			requestQuery(form, term, token);
 		}
@@ -188,7 +204,7 @@
 				var term = termData.term || termData;
 				var chip = el('button', 'ys-ss-chip' + (extraClass ? ' ' + extraClass : ''), term);
 				chip.type = 'button';
-				chip.addEventListener('click', function () { startChipSearch(term); });
+				chip.addEventListener('click', function (event) { startChipSearch(term, event); });
 				wrap.appendChild(chip);
 			});
 			section.appendChild(wrap);
@@ -296,9 +312,17 @@
 	}
 
 	function requestSuggestions(form, token) {
+		if (suggestCache) {
+			if (isCurrent(form, token, '', 'suggest')) {
+				renderPanelState(form, 'suggest', { data: suggestCache });
+			}
+			return;
+		}
+		if (isCurrent(form, token, '', 'suggest')) {
+			renderPanelState(form, 'suggest', { busyOnly: true, busy: true });
+		}
 		loadSuggestions().then(function (data) {
 			if (!isCurrent(form, token, '', 'suggest')) { return; }
-			var state = controller(form);
 			renderPanelState(form, 'suggest', { data: data });
 		}).catch(function () {
 			if (!isCurrent(form, token, '', 'suggest')) { return; }
@@ -324,7 +348,11 @@
 				if (!isCurrent(form, token, query, 'loading')) { return; }
 				state = controller(form);
 				if (state.activeRequest === requestController) { state.activeRequest = null; }
-				if (data && data.q && data.log_receipt) {
+				if (data
+					&& typeof data.q === 'string'
+					&& data.q
+					&& typeof data.log_receipt === 'string'
+					&& data.log_receipt) {
 					var productsTotal = data.products_total;
 					if (typeof productsTotal !== 'number'
 						|| !Number.isFinite(productsTotal)
@@ -342,16 +370,25 @@
 					form._ysSsLogProof = state.proof;
 				}
 
+				if (!state.proof) {
+					state.mode = 'empty';
+					renderPanelState(form, 'empty', { data: null, suggestions: null });
+					return;
+				}
+
 				var groups = (data && data.groups) || [];
 				if (!groups.length) {
 					state.mode = 'empty';
 					renderPanelState(form, 'empty', { data: data, suggestions: null });
+					if (!suggestCache && isCurrent(form, token, query, 'empty')) {
+						renderPanelState(form, 'empty', { busyOnly: true, busy: true });
+					}
 					loadSuggestions().then(function (suggestions) {
 						if (!isCurrent(form, token, query, 'empty')) { return; }
 						renderPanelState(form, 'empty', { data: data, suggestions: suggestions });
 					}).catch(function () {
 						if (!isCurrent(form, token, query, 'empty')) { return; }
-						renderFailure(form);
+						renderPanelState(form, 'empty', { busyOnly: true, busy: false });
 					});
 				} else {
 					state.mode = 'results';
@@ -411,6 +448,7 @@
 		});
 		input.addEventListener('input', startFromInput);
 		input.addEventListener('focus', function () {
+			if (controller(form).suppressFocus) { return; }
 			var query = (input.value || '').trim();
 			var token = beginInteraction(form, query ? 'query' : 'suggest');
 			if (query) { requestQuery(form, query, token); } else { requestSuggestions(form, token); }
@@ -447,6 +485,7 @@
 		});
 
 		document.addEventListener('click', function (event) {
+			if (event._ysSsActivationOwner === form) { return; }
 			if (!form.contains(event.target)) {
 				closeInteraction(form);
 			}

@@ -275,6 +275,9 @@ final class YSSsFakeWpdb
 
 final class YSSsWpFake
 {
+    /** @var array<int,WP_Post> */
+    public static array $posts = [];
+
     /** @var list<array<string,mixed>> */
     public static array $wpQueryArgs = [];
 
@@ -355,6 +358,7 @@ final class YSSsWpFake
 
     public static function reset(): void
     {
+        self::$posts = [];
         self::$wpQueryArgs = [];
         self::$wpQueryPosts = [];
         self::$transients = [];
@@ -508,6 +512,19 @@ if (!class_exists('WP_REST_Server')) {
         public const READABLE = 'GET';
         public const CREATABLE = 'POST';
         public const DELETABLE = 'DELETE';
+    }
+}
+
+if (!class_exists('WP_Post')) {
+    class WP_Post
+    {
+        public function __construct(
+            public int $ID,
+            public string $post_type = 'page',
+            public string $post_status = 'publish',
+            public string $post_content = ''
+        ) {
+        }
     }
 }
 
@@ -850,7 +867,7 @@ if (!function_exists('get_post_types')) {
 if (!function_exists('get_post')) {
     function get_post(int $id): mixed
     {
-        return null;
+        return YSSsWpFake::$posts[$id] ?? null;
     }
 }
 

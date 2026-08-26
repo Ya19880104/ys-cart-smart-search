@@ -82,6 +82,33 @@ ysss_test('keyword update stores approved technical bytes exactly', static funct
     ysss_keyword_assert_one_invalidation(YSSsSuggestService::INVALIDATION_ROTATED, $response);
 });
 
+ysss_test('decoded REST JSON create and update preserve backslashes and C++ bytes exactly', static function (): void {
+    foreach (['C:\Users\Nova\manual.pdf', 'C++ <vector>'] as $term) {
+        YSSsWpFake::reset();
+        $GLOBALS['wpdb']->insertHandler = static function (string $table, array $data, YSSsFakeWpdb $db): int {
+            $db->insert_id = 61;
+            return 1;
+        };
+        $GLOBALS['wpdb']->resultSets = [[ysss_keyword_item(61, $term)]];
+        $created = (new YSSsAdminController())->keywords_create(new WP_REST_Request([
+            'keyword' => $term,
+            'sort_order' => 0,
+        ]));
+        ysss_assert_true($created instanceof WP_REST_Response);
+        ysss_assert_same($term, $GLOBALS['wpdb']->inserts[0]['data']['keyword'] ?? null, 'Decoded JSON create bytes were unslashed or rewritten');
+
+        YSSsWpFake::reset();
+        $GLOBALS['wpdb']->updateHandler = static fn(string $table, array $data, array $where, YSSsFakeWpdb $db): int => 1;
+        $GLOBALS['wpdb']->resultSets = [[ysss_keyword_item(62, $term)]];
+        $updated = (new YSSsAdminController())->keywords_update(new WP_REST_Request([
+            'id' => 62,
+            'keyword' => $term,
+        ]));
+        ysss_assert_true($updated instanceof WP_REST_Response);
+        ysss_assert_same($term, $GLOBALS['wpdb']->updates[0]['data']['keyword'] ?? null, 'Decoded JSON update bytes were unslashed or rewritten');
+    }
+});
+
 ysss_test('invalid keyword inputs and an unrecognized patch perform zero write and invalidation work', static function (): void {
     $cases = [
         ['method' => 'create', 'params' => ['keyword' => '']],

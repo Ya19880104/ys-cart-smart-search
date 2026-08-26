@@ -21,6 +21,7 @@ use YangSheep\SmartSearch\Database\YSSsKeywordRepository;
 use YangSheep\SmartSearch\Database\YSSsAnalyticsMutationException;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Database\YSSsSettings;
+use YangSheep\SmartSearch\Frontend\YSSsResultsPage;
 use YangSheep\SmartSearch\Security\YSSsSearchInput;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
@@ -244,8 +245,23 @@ final class YSSsAdminController {
 		if ( ! is_array( $patch ) ) {
 			return new \WP_Error( 'ys_ss_bad_payload', 'invalid payload', [ 'status' => 400 ] );
 		}
-		$settings = YSSsSettings::update( $patch );
-		if ( $settings !== YSSsSettings::all() ) {
+		$expected = YSSsSettings::update( $patch );
+		$settings = YSSsSettings::all();
+
+		// update_option hooks run synchronously. Switching to page mode may therefore provision
+		// the results page through a nested settings write before update() returns. Accept only
+		// that one contract-completing difference; every other final-storage drift is a failure.
+		$settled_expected = $expected;
+		if ( 'page' === ( $expected['results_mode'] ?? '' )
+			&& ! YSSsResultsPage::valid_page_id( (int) ( $expected['results_page_id'] ?? 0 ) )
+			&& 'page' === ( $settings['results_mode'] ?? '' )
+			&& YSSsResultsPage::valid_page_id( (int) ( $settings['results_page_id'] ?? 0 ) ) ) {
+			$settled_expected['results_page_id'] = (int) $settings['results_page_id'];
+		}
+
+		$page_contract_complete = 'page' !== ( $settings['results_mode'] ?? '' )
+			|| YSSsResultsPage::valid_page_id( (int) ( $settings['results_page_id'] ?? 0 ) );
+		if ( ! $page_contract_complete || $settings !== $settled_expected ) {
 			return new \WP_Error(
 				'ys_ss_settings_write_failed',
 				__( '設定儲存失敗，請稍後再試。', 'ys-cart-smart-search' ),
@@ -311,7 +327,9 @@ final class YSSsAdminController {
 		if ( ! is_string( $value ) ) {
 			return $this->invalid_keyword_error();
 		}
-		$decision = YSSsSearchInput::inspect( wp_unslash( $value ) );
+		// REST JSON values are already decoded, unslashed bytes. A second wp_unslash() corrupts
+		// legitimate technical terms such as Windows paths.
+		$decision = YSSsSearchInput::inspect( $value );
 		if ( $decision['blocked'] || '' === $decision['query'] ) {
 			return $this->invalid_keyword_error();
 		}
