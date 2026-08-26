@@ -82,7 +82,7 @@ $compatibility_noise_cases = [
 
         ysss_test("analytics repository rejects compatibility-folded {$label}", static function () use ($index, $label, $query, $total): void {
             YSSsWpFake::reset();
-            YSSsQueryRepository::log($query, $total, 'products', 'bar', "compatibility-noise-{$index}");
+            YSSsQueryRepository::log($query, $query, $total, 'products', 'bar', "compatibility-noise-{$index}");
             ysss_assert_same([], $GLOBALS['wpdb']->inserts, "Compatibility fixture {$index} inserted analytics for {$label}");
             ysss_assert_same([], $GLOBALS['wpdb']->queries, "Compatibility fixture {$index} reached a database query for {$label}");
         });
@@ -96,7 +96,7 @@ ysss_test('analytics rejects incomplete canonical closure with zero repository w
 
     ysss_assert_same(YSSsAnalyticsAdmission::REJECT_ATTACK, YSSsAnalyticsAdmission::classify($payload, 4));
     YSSsWpFake::reset();
-    YSSsQueryRepository::log($payload, 4, 'products', 'bar', 'closure-exhaustion');
+    YSSsQueryRepository::log($payload, $payload, 4, 'products', 'bar', 'closure-exhaustion');
     ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'Incomplete closure inserted analytics');
     ysss_assert_same([], $GLOBALS['wpdb']->queries, 'Incomplete closure reached repository SQL');
 });
@@ -121,7 +121,7 @@ foreach ($token_local_cases as $index => [$query, $total, $expected, $should_ins
         ysss_assert_same($expected, YSSsAnalyticsAdmission::classify($query, $total), "Unexpected admission for fixture {$index}");
 
         YSSsWpFake::reset();
-        YSSsQueryRepository::log($query, $total, 'products', 'bar', "identifier-span-{$index}");
+        YSSsQueryRepository::log($query, $query, $total, 'products', 'bar', "identifier-span-{$index}");
         ysss_assert_same(
             $should_insert ? 1 : 0,
             count($GLOBALS['wpdb']->inserts),
@@ -134,12 +134,12 @@ ysss_test('analytics write bottleneck ignores machine parameters but retains hum
     ysss_assert_true(class_exists(YSSsAnalyticsAdmission::class), 'Analytics admission SOT is missing');
 
     YSSsWpFake::reset();
-    YSSsQueryRepository::log('utm_source=bot&utm_campaign=sale', 4, 'products', 'bar', 'visitor-known-param');
+    YSSsQueryRepository::log('utm_source=bot&utm_campaign=sale', 'utm_source=bot&utm_campaign=sale', 4, 'products', 'bar', 'visitor-known-param');
     ysss_assert_same([], $GLOBALS['wpdb']->queries, 'Rejected analytics noise reached the database');
     ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'Rejected analytics noise was inserted');
 
     YSSsWpFake::reset();
-    YSSsQueryRepository::log('想買但找不到的商品', 0, 'products', 'bar', 'visitor-human-zero');
+    YSSsQueryRepository::log('想買但找不到的商品', '想買但找不到的商品', 0, 'products', 'bar', 'visitor-human-zero');
     ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Human zero-result search was not retained for analysis');
     ysss_assert_same(0, $GLOBALS['wpdb']->inserts[0]['data']['has_results'] ?? null);
 });

@@ -77,6 +77,26 @@ ysss_test('log receipt rejects tamper query and visitor mismatch', static functi
     ysss_assert_same(null, YSSsLogReceipt::verify($receipt, 'nova', 'visitor-other'));
 });
 
+ysss_test('v2 receipt binds exact ingress without exposing it in payload claims', static function () use ($receiptClaims): void {
+    $raw = "Nova  exact\\path " . str_repeat('x', 110);
+    $receipt = YSSsLogReceipt::issue_for_request('nova exact path', 2, 'products', 'visitor-12345678', $raw, 1787702370);
+    ysss_assert_true('' !== $receipt);
+    ysss_assert_same([
+        'query' => 'nova exact path',
+        'total' => 2,
+        'content_types' => 'products',
+        'visitor_hash' => 'visitor-12345678',
+    ], YSSsLogReceipt::verify_bound($receipt, 'nova exact path', $raw, 'visitor-12345678', 1787702370));
+    ysss_assert_same(null, YSSsLogReceipt::verify_bound($receipt, 'nova exact path', $raw . 'x', 'visitor-12345678', 1787702370));
+    ysss_assert_same(null, YSSsLogReceipt::verify_bound($receipt, 'nova exact path', strtolower($raw), 'visitor-12345678', 1787702370));
+    $wire = $receiptClaims($receipt);
+    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'iat', 'exp'], array_keys($wire));
+    ysss_assert_false(str_contains((string) json_encode($wire), $raw), 'Receipt payload exposed exact ingress');
+    foreach (['raw', 'ingress', 'digest', 'hash', 'admitted', 'reason'] as $forbidden) {
+        ysss_assert_false(array_key_exists($forbidden, $wire), "Receipt payload exposed {$forbidden}");
+    }
+});
+
 ysss_test('log receipt rejects non-canonical base64url signature spelling', static function (): void {
     $receipt = YSSsLogReceipt::issue('nova', 0, 'products', 'visitor-12345678');
     [$payload, $signature] = explode('.', $receipt, 2);
@@ -130,12 +150,12 @@ ysss_test('legacy v1 receipt verifies across UTC midnight with explicit compatib
     ysss_assert_same(null, YSSsLogReceipt::verify($receipt, 'nova', 'visitor-other', $verifyAt));
 });
 
-ysss_test('issued v1 receipt preserves the supplied issue clock and exact TTL', static function () use ($receiptClaims, $issueAt, $verifyAt, $issueVisitor): void {
+ysss_test('issued v2 receipt preserves the supplied issue clock and exact TTL', static function () use ($receiptClaims, $issueAt, $verifyAt, $issueVisitor): void {
     YSSsWpFake::reset();
     $receipt = YSSsLogReceipt::issue('nova', 5, 'products', $issueVisitor, $issueAt);
     ysss_assert_true('' !== $receipt, 'Cross-midnight receipt was not issued');
     $wire = $receiptClaims($receipt);
-    ysss_assert_same(1, $wire['v'] ?? null);
+    ysss_assert_same(2, $wire['v'] ?? null);
     ysss_assert_same($issueAt, $wire['iat'] ?? null);
     ysss_assert_same($issueAt + 120, $wire['exp'] ?? null);
     ysss_assert_same($issueVisitor, $wire['vh'] ?? null);
@@ -144,32 +164,24 @@ ysss_test('issued v1 receipt preserves the supplied issue clock and exact TTL', 
         'total' => 5,
         'content_types' => 'products',
         'visitor_hash' => $issueVisitor,
-    ], YSSsLogReceipt::verify_for_request($receipt, 'nova', $verifyAt));
+    ], YSSsLogReceipt::verify_for_request($receipt, 'nova', 'nova', $verifyAt));
 });
 
-ysss_test('request verification uses signed issue day and rejects changed IP or UA', static function () use ($signedFixture, $issueAt, $verifyAt, $issueVisitor): void {
+ysss_test('v2 request verification uses signed issue day and rejects changed IP or UA', static function () use ($issueAt, $verifyAt, $issueVisitor): void {
     YSSsWpFake::reset();
-    $receipt = $signedFixture([
-        'v' => 1,
-        'q' => 'nova',
-        't' => 5,
-        'c' => 'products',
-        'vh' => $issueVisitor,
-        'iat' => $issueAt,
-        'exp' => $issueAt + 120,
-    ]);
+    $receipt = YSSsLogReceipt::issue_for_request('nova', 5, 'products', $issueVisitor, 'nova', $issueAt);
     ysss_assert_same([
         'query' => 'nova',
         'total' => 5,
         'content_types' => 'products',
         'visitor_hash' => $issueVisitor,
-    ], YSSsLogReceipt::verify_for_request($receipt, 'nova', $verifyAt));
+    ], YSSsLogReceipt::verify_for_request($receipt, 'nova', 'nova', $verifyAt));
 
     $_SERVER['REMOTE_ADDR'] = '198.51.100.44';
-    ysss_assert_same(null, YSSsLogReceipt::verify_for_request($receipt, 'nova', $verifyAt));
+    ysss_assert_same(null, YSSsLogReceipt::verify_for_request($receipt, 'nova', 'nova', $verifyAt));
     $_SERVER['REMOTE_ADDR'] = '192.0.2.10';
     $_SERVER['HTTP_USER_AGENT'] = 'changed-user-agent';
-    ysss_assert_same(null, YSSsLogReceipt::verify_for_request($receipt, 'nova', $verifyAt));
+    ysss_assert_same(null, YSSsLogReceipt::verify_for_request($receipt, 'nova', 'nova', $verifyAt));
 });
 
 ysss_test('verified parser rejects expiry old age tamper future issue time and wrong TTL', static function () use ($signedFixture, $issueAt, $verifyAt, $issueVisitor): void {
@@ -233,7 +245,7 @@ ysss_test('empty visitor hashes are never issued or accepted', static function (
         'exp' => $issueAt + 120,
     ]);
     ysss_assert_same(null, YSSsLogReceipt::verify($emptyVisitor, 'nova', '', $verifyAt));
-    ysss_assert_same(null, YSSsLogReceipt::verify_for_request($emptyVisitor, 'nova', $verifyAt));
+    ysss_assert_same(null, YSSsLogReceipt::verify_for_request($emptyVisitor, 'nova', 'nova', $verifyAt));
 });
 
 ysss_test('query signs the non-zero total produced by the server search', static function (): void {
@@ -266,7 +278,7 @@ ysss_test('query signs the non-zero total produced by the server search', static
     ysss_assert_same(2, $data['products_total'] ?? null, 'Product-positive total did not reflect the visible product group');
     ysss_assert_true(is_string($data['log_receipt'] ?? null) && '' !== $data['log_receipt'], 'Valid query did not receive a receipt');
     $visitor = YSSsRateLimiter::visitor_hash();
-    $claims = YSSsLogReceipt::verify($data['log_receipt'], 'nova', $visitor);
+    $claims = YSSsLogReceipt::verify_bound($data['log_receipt'], 'nova', 'Nova', $visitor);
     ysss_assert_same([
         'query' => 'nova',
         'total' => 2,
@@ -299,12 +311,13 @@ ysss_test('category and post only query keeps display total but signs zero produ
     ysss_assert_same(5, $data['total'] ?? null, 'Category/post display total was lost');
     $receipt = (string) ($data['log_receipt'] ?? '');
     $visitor = YSSsRateLimiter::visitor_hash();
-    ysss_assert_same(0, YSSsLogReceipt::verify($receipt, 'nova', $visitor)['total'] ?? null, 'Aggregate display total was signed as product authority');
-    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'iat', 'exp'], array_keys($receiptClaims($receipt)), 'Receipt v1 wire keys changed');
+    ysss_assert_same(0, YSSsLogReceipt::verify_bound($receipt, 'nova', 'Nova', $visitor)['total'] ?? null, 'Aggregate display total was signed as product authority');
+    ysss_assert_same(['v', 'q', 't', 'c', 'vh', 'iat', 'exp'], array_keys($receiptClaims($receipt)), 'Receipt v2 wire keys changed');
     ysss_assert_same(0, $data['products_total'] ?? null, 'Category/post-only results gained product authority');
 
     $logged = $controller->log(new WP_REST_Request([
         'q' => 'nova',
+        'ingress' => 'Nova',
         'receipt' => $receipt,
         'source' => 'bar',
     ]));
@@ -335,9 +348,10 @@ ysss_test('product plus category query signs only the product contribution', sta
     $data = $response->get_data();
     ysss_assert_same(7, $data['total'] ?? null, 'Aggregate display total changed');
     ysss_assert_same(2, $data['products_total'] ?? null, 'Product contribution was not separated');
-    $claims = YSSsLogReceipt::verify(
+    $claims = YSSsLogReceipt::verify_bound(
         (string) ($data['log_receipt'] ?? ''),
         'nova',
+        'Nova',
         YSSsRateLimiter::visitor_hash()
     );
     ysss_assert_same(2, $claims['total'] ?? null, 'Category count leaked into signed product authority');
@@ -363,9 +377,10 @@ ysss_test('query receipt matches filter-final groups and preserves searched scop
     ysss_assert_same(0, $data['total'] ?? null, 'Total was not recomputed from filter-final groups');
     ysss_assert_same(0, $data['products_total'] ?? null, 'Removing the product group did not revoke product authority');
     $visitor = YSSsRateLimiter::visitor_hash();
-    $claims = YSSsLogReceipt::verify(
+    $claims = YSSsLogReceipt::verify_bound(
         (string) ($data['log_receipt'] ?? ''),
         'nova',
+        'Nova',
         $visitor
     );
     ysss_assert_same([
@@ -389,9 +404,10 @@ ysss_test('filter-added visible exact product group grants product authority', s
     $data = $response->get_data();
     ysss_assert_same(4, $data['total'] ?? null);
     ysss_assert_same(4, $data['products_total'] ?? null, 'Visible exact-type filtered product group did not grant authority');
-    $claims = YSSsLogReceipt::verify(
+    $claims = YSSsLogReceipt::verify_bound(
         (string) ($data['log_receipt'] ?? ''),
         'nova',
+        'Nova',
         YSSsRateLimiter::visitor_hash()
     );
     ysss_assert_same(4, $claims['total'] ?? null);
@@ -502,9 +518,10 @@ ysss_test('query bounds aggregate and product totals independently', static func
     $data = $response->get_data();
     ysss_assert_same(1000000, $data['total'] ?? null, 'Aggregate total was not independently bounded');
     ysss_assert_same(7, $data['products_total'] ?? null, 'Aggregate bound overwrote product authority');
-    $claims = YSSsLogReceipt::verify(
+    $claims = YSSsLogReceipt::verify_bound(
         (string) ($data['log_receipt'] ?? ''),
         'nova',
+        'Nova',
         YSSsRateLimiter::visitor_hash()
     );
     ysss_assert_same(7, $claims['total'] ?? null, 'Receipt did not bind the independently bounded product total');
@@ -522,9 +539,10 @@ ysss_test('query response and receipt share the same total upper bound', static 
     $data = $response->get_data();
     ysss_assert_same(1000000, $data['total'] ?? null, 'Public total exceeded the signed claim bound');
     ysss_assert_same(1000000, $data['products_total'] ?? null, 'Product total exceeded its signed claim bound');
-    $claims = YSSsLogReceipt::verify(
+    $claims = YSSsLogReceipt::verify_bound(
         (string) ($data['log_receipt'] ?? ''),
         'nova',
+        'Nova',
         YSSsRateLimiter::visitor_hash()
     );
     ysss_assert_same(1000000, $claims['total'] ?? null, 'Receipt total diverged from the public response');
@@ -585,9 +603,10 @@ ysss_test('query controller captures one issue clock for visitor and receipt', s
         $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => 'Nova']));
         ysss_assert_true($response instanceof WP_REST_Response);
         $data = $response->get_data();
-        $claims = YSSsLogReceipt::verify(
+        $claims = YSSsLogReceipt::verify_bound(
             (string) ($data['log_receipt'] ?? ''),
             'nova',
+            'Nova',
             $issueVisitor,
             $issueAt
         );
@@ -656,6 +675,7 @@ ysss_test('log ignores client total and stores signed server total', static func
     $receipt = YSSsLogReceipt::issue('nova', 0, 'products', $visitor);
     $response = (new YSSsPublicController())->log(new WP_REST_Request([
         'q' => 'nova',
+        'ingress' => 'nova',
         'total' => 999,
         'receipt' => $receipt,
         'source' => 'bar',
@@ -668,18 +688,10 @@ ysss_test('log ignores client total and stores signed server total', static func
     ysss_assert_same('products', $data['content_types'] ?? null);
 });
 
-ysss_test('log controller replays across UTC midnight with one repository dedupe identity', static function () use ($signedFixture, $issueAt, $verifyAt, $issueVisitor, $verifyDayVisitor): void {
+ysss_test('log controller replays a v2 receipt across UTC midnight with one repository dedupe identity', static function () use ($issueAt, $verifyAt, $issueVisitor, $verifyDayVisitor): void {
     YSSsWpFake::reset();
     ysss_assert_false($issueVisitor === $verifyDayVisitor, 'Cross-midnight identities unexpectedly match');
-    $receipt = $signedFixture([
-        'v' => 1,
-        'q' => 'nova',
-        't' => 2,
-        'c' => 'products',
-        'vh' => $issueVisitor,
-        'iat' => $issueAt,
-        'exp' => $issueAt + 120,
-    ]);
+    $receipt = YSSsLogReceipt::issue_for_request('nova', 2, 'products', $issueVisitor, 'nova', $issueAt);
     $dedupeSql = [];
     $dedupeClockPhases = [];
     $GLOBALS['wpdb']->getVarHandler = static function (string $sql) use (&$dedupeSql, &$dedupeClockPhases): int {
@@ -699,6 +711,7 @@ ysss_test('log controller replays across UTC midnight with one repository dedupe
     try {
         $first = (new YSSsPublicController())->log(new WP_REST_Request([
             'q' => 'nova',
+            'ingress' => 'nova',
             'total' => 999,
             'receipt' => $receipt,
             'source' => 'bar',
@@ -706,6 +719,7 @@ ysss_test('log controller replays across UTC midnight with one repository dedupe
         $GLOBALS['ysss_receipt_security_now'] = $verifyAt;
         $second = (new YSSsPublicController())->log(new WP_REST_Request([
             'q' => 'nova',
+            'ingress' => 'nova',
             'total' => 999,
             'receipt' => $receipt,
             'source' => 'bar',
@@ -744,6 +758,7 @@ ysss_test('invalid or expired receipts perform zero insert with the same respons
     foreach (['not-a-receipt', $expired] as $receipt) {
         $response = (new YSSsPublicController())->log(new WP_REST_Request([
             'q' => 'nova',
+            'ingress' => 'nova',
             'total' => 999,
             'receipt' => $receipt,
             'source' => 'bar',
@@ -755,8 +770,9 @@ ysss_test('invalid or expired receipts perform zero insert with the same respons
 
 ysss_test('non-scalar receipt and source fail neutral without PHP warnings', static function (): void {
     foreach ([
-        ['q' => 'nova', 'receipt' => ['not-a-string'], 'source' => 'bar'],
-        ['q' => 'nova', 'receipt' => 'not-a-receipt', 'source' => ['not-a-string']],
+        ['q' => 'nova', 'ingress' => 'nova', 'receipt' => ['not-a-string'], 'source' => 'bar'],
+        ['q' => 'nova', 'ingress' => 'nova', 'receipt' => 'not-a-receipt', 'source' => ['not-a-string']],
+        ['q' => 'nova', 'ingress' => ['not-a-string'], 'receipt' => 'not-a-receipt', 'source' => 'bar'],
     ] as $params) {
         YSSsWpFake::reset();
         $warnings = [];
@@ -796,17 +812,130 @@ ysss_test('concurrent receipt replay is serialized before dedupe and insert', st
         if (str_contains($sql, 'SELECT 1 FROM')) {
             if (!$interleaved) {
                 $interleaved = true;
-                YSSsQueryRepository::log('nova', 2, 'products', 'bar', $visitor);
+                YSSsQueryRepository::log('nova', 'nova', 2, 'products', 'bar', $visitor);
             }
             return 0;
         }
         return 0;
     };
 
-    YSSsQueryRepository::log('nova', 2, 'products', 'bar', $visitor);
+    YSSsQueryRepository::log('nova', 'nova', 2, 'products', 'bar', $visitor);
     ysss_assert_true($interleaved, 'Forced interleaving did not execute');
     ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Concurrent replay inserted the same analytics event twice');
     ysss_assert_false($lockHeld, 'Replay lock was not released');
     ysss_assert_true((bool) array_filter($GLOBALS['wpdb']->queries, static fn(string $sql): bool => str_contains($sql, 'GET_LOCK')), 'No atomic serialization lock was attempted');
+});
+
+ysss_test('full ingress tails remain bound through query receipt and analytics admission', static function (): void {
+    $prefix = str_repeat('nova ', 20);
+    $cases = [
+        'known parameter' => $prefix . 'utm_source=tail',
+        'two opaque tokens' => $prefix . ' zqxwvutsrqponmlkjihgfed qwertyuiopasdfghjklzxcvb',
+    ];
+
+    foreach ($cases as $label => $raw) {
+        YSSsWpFake::reset();
+        add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
+            'type' => 'products',
+            'label' => 'Products',
+            'total' => 1,
+            'items' => [['title' => 'Visible product', 'url' => '/product/visible']],
+        ]]);
+
+        $controller = new YSSsPublicController();
+        $response = $controller->query(new WP_REST_Request(['q' => $raw]));
+        ysss_assert_true($response instanceof WP_REST_Response);
+        $data = $response->get_data();
+        ysss_assert_same(1, $data['products_total'] ?? null, "{$label} stopped the legitimate content search");
+        ysss_assert_true(is_string($data['log_receipt'] ?? null) && '' !== $data['log_receipt'], "{$label} changed the safe-search receipt shape");
+        ysss_assert_same('', $data['recent_term'] ?? null, "{$label} received browser-memory authority");
+
+        $logged = $controller->log(new WP_REST_Request([
+            'q' => (string) ($data['q'] ?? ''),
+            'ingress' => $raw,
+            'receipt' => (string) $data['log_receipt'],
+            'source' => 'bar',
+        ]));
+        ysss_assert_same(['ok' => true], $logged->get_data());
+        ysss_assert_same([], $GLOBALS['wpdb']->inserts, "{$label} tail was lost before analytics admission");
+    }
+});
+
+ysss_test('a clean-prefix receipt cannot authorize a different noisy full ingress', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
+        'type' => 'products',
+        'label' => 'Products',
+        'total' => 1,
+        'items' => [['title' => 'Visible product', 'url' => '/product/visible']],
+    ]]);
+    $clean = str_repeat('nova ', 20);
+    $controller = new YSSsPublicController();
+    $data = $controller->query(new WP_REST_Request(['q' => $clean]))->get_data();
+    ysss_assert_true(is_string($data['log_receipt'] ?? null) && '' !== $data['log_receipt']);
+
+    $response = $controller->log(new WP_REST_Request([
+        'q' => (string) ($data['q'] ?? ''),
+        'ingress' => $clean . 'utm_source=tail',
+        'receipt' => (string) $data['log_receipt'],
+        'source' => 'bar',
+    ]));
+
+    ysss_assert_same(['ok' => true], $response->get_data());
+    ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'Receipt accepted a different raw value with the same first 100 characters');
+});
+
+ysss_test('a recognizable long ingress searches logs and stores only its canonical bounded query', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
+        'type' => 'products',
+        'label' => 'Products',
+        'total' => 1,
+        'items' => [['title' => 'Visible product', 'url' => '/product/visible']],
+    ]]);
+    $raw = str_repeat('Nova wool ', 12) . 'ISBN-9781234567890';
+    $controller = new YSSsPublicController();
+    $data = $controller->query(new WP_REST_Request(['q' => $raw]))->get_data();
+    ysss_assert_same(1, $data['products_total'] ?? null);
+    ysss_assert_true(is_string($data['recent_term'] ?? null) && '' !== $data['recent_term']);
+
+    $response = $controller->log(new WP_REST_Request([
+        'q' => (string) ($data['q'] ?? ''),
+        'ingress' => $raw,
+        'receipt' => (string) ($data['log_receipt'] ?? ''),
+        'source' => 'bar',
+    ]));
+
+    ysss_assert_same(['ok' => true], $response->get_data());
+    ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Recognizable long ingress lost analytics');
+    $stored = $GLOBALS['wpdb']->inserts[0]['data'] ?? [];
+    ysss_assert_same($data['q'] ?? null, $stored['query_norm'] ?? null);
+    ysss_assert_same($data['q'] ?? null, $stored['query_raw'] ?? null, 'Full ingress tail leaked into analytics storage');
+    ysss_assert_false(str_contains((string) ($stored['query_raw'] ?? ''), 'ISBN-9781234567890'), 'Out-of-bound ingress tail reached DB storage');
+});
+
+ysss_test('public analytics rejects an otherwise valid query-only v1 receipt', static function () use ($signedFixture): void {
+    YSSsWpFake::reset();
+    $now = time();
+    $visitor = YSSsRateLimiter::visitor_hash_at($now);
+    $receipt = $signedFixture([
+        'v' => 1,
+        'q' => 'nova',
+        't' => 1,
+        'c' => 'products',
+        'vh' => $visitor,
+        'iat' => $now,
+        'exp' => $now + 120,
+    ]);
+
+    $response = (new YSSsPublicController())->log(new WP_REST_Request([
+        'q' => 'nova',
+        'ingress' => 'nova',
+        'receipt' => $receipt,
+        'source' => 'bar',
+    ]));
+
+    ysss_assert_same(['ok' => true], $response->get_data());
+    ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'A v1 query-only receipt retained public analytics write authority');
 });
 }

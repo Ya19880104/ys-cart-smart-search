@@ -95,7 +95,7 @@ $check('C8 addon 5 rules (core ns / no admin-ajax / no top menu / YSAdminApp / y
 
 // C9 安全：公開端點限流、log sanitize + 長度限制、admin nonce+capability、簽發日 receipt 身分（無 PII）
 $check('C9 security (rate limits / sanitized log / admin nonce+cap / signed issue-day identity)',
-    str_contains($pubCtrl, "allow( 'query', 60 )")
+    str_contains($pubCtrl, 'allow_public_query()')
     && str_contains($pubCtrl, "allow( 'log', 30 )")
     && str_contains($pubCtrl, 'YSSsSearchInput::inspect')
     && str_contains($admCtrl, "wp_verify_nonce")
@@ -233,7 +233,7 @@ $check('C23 v1.4.3 view_all mode-aware helper + write-path dedupe centralized in
     && str_contains($frontJs, 'data.view_all')
     // P2：600 秒去重位於 log()（唯一寫入瓶頸）、queries 去重 SELECT 僅一處（log_page 委派）
     && substr_count($queryRepo, 'created_at >= %s AND visitor_hash = %s') === 1
-    && str_contains($queryRepo, "self::log( \$raw, \$results_total, \$content_types, 'page', \$visitor_hash )")
+    && str_contains($queryRepo, "self::log( \$query, \$admission_ingress, \$results_total, \$content_types, 'page', \$visitor_hash )")
     // 版本
     && version_compare($vh[1] ?? '0', '1.4.3', '>=') && str_contains($log, '## [1.4.3]'));
 
@@ -313,6 +313,23 @@ $check('C28 v1.5.3 exact metadata parity + release floor',
     && ($vh[1] ?? '') === ($vc[1] ?? '')
     && ($vh[1] ?? '') === ($vl[1] ?? '')
     && version_compare($vh[1] ?? '0', '1.5.3', '>='));
+
+// C29 fix-5：完整 ingress receipt／分析分流、recent v2，以及 REST/B 唯一 query 預算。
+$check('C29 v1.5.3 fix-5 full-ingress analytics + shared public query authority',
+    str_contains($limiter, 'function allow_public_query')
+    && str_contains($limiter, "self::allow( 'query', 60 )")
+    && str_contains($pubCtrl, 'allow_public_query()')
+    && str_contains($results, 'allow_public_query()')
+    && str_contains($receipt, 'ys-ss-log-receipt-v2')
+    && str_contains($receipt, 'signature_input( $payload, $raw )')
+    && str_contains($receipt, 'verified_claims( $receipt, $query, $raw, $now, false )')
+    && str_contains($pubCtrl, "\$request->get_param( 'ingress' )")
+    && str_contains($pubCtrl, "\$input['raw']")
+    && str_contains($results, "\$input['raw']")
+    && str_contains($queryRepo, 'string $admission_ingress')
+    && str_contains($frontJs, "ysss_recent_v2")
+    && str_contains($frontJs, 'ingress: ingress')
+    && ! str_contains($frontJs, "var RECENT_KEY = 'ysss_recent';"));
 
 echo "\nv1.5.3 contract: PASS={$pass} FAIL={$fail}\n";
 if ($fail > 0) {

@@ -46,6 +46,7 @@ foreach ($cases['allowed'] as $label => $input) {
         $decision = YSSsSearchInput::inspect($input);
         ysss_assert_same(false, $decision['blocked'] ?? null);
         ysss_assert_same($input, $decision['query'] ?? null, 'Accepted search bytes were changed');
+        ysss_assert_same($input, $decision['raw'] ?? null, 'Exact accepted ingress was not retained separately');
     });
 }
 
@@ -123,6 +124,7 @@ ysss_test('neutral result never reflects blocked payload or consults settings', 
         'content_types' => [],
         'view_all' => '',
         'log_receipt' => '',
+        'recent_term' => '',
     ], $result);
     ysss_assert_same([], $GLOBALS['wpdb']->queries);
 });

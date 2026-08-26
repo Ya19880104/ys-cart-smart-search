@@ -21,6 +21,13 @@ final class YSSsRateLimiter {
 	private const CLEAN_BATCHES = 20;
 
 	/**
+	 * REST live search and B-mode results navigation share one fixed public-search budget.
+	 */
+	public static function allow_public_query(): bool {
+		return self::allow( 'query', 60 );
+	}
+
+	/**
 	 * @return bool true = 放行；false = 超限或權威不可用。
 	 */
 	public static function allow( string $action, int $limit_per_minute ): bool {

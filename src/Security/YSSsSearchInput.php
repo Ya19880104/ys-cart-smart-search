@@ -23,7 +23,7 @@ final class YSSsSearchInput {
 	}
 
 	/**
-	 * @return array{blocked:bool,query:string}
+	 * @return array{blocked:bool,query:string,raw:string}
 	 */
 	public static function inspect( mixed $value ): array {
 		if ( ! is_scalar( $value ) && null !== $value ) {
@@ -55,7 +55,12 @@ final class YSSsSearchInput {
 		}
 		$query = YSSsText::truncate_chars( $query, self::MAX_QUERY_CHARS );
 
-		return [ 'blocked' => false, 'query' => $query ];
+
+		return [
+			'blocked' => false,
+			'query'   => $query,
+			'raw'     => $raw,
+		];
 	}
 
 	/**
@@ -110,9 +115,9 @@ final class YSSsSearchInput {
 	}
 
 	/**
-	 * @return array{blocked:true,query:string}
+	 * @return array{blocked:true,query:string,raw:string}
 	 */
 	private static function blocked(): array {
-		return [ 'blocked' => true, 'query' => '' ];
+		return [ 'blocked' => true, 'query' => '', 'raw' => '' ];
 	}
 }

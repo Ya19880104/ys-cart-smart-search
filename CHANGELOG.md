@@ -18,10 +18,11 @@
   只顯示文字的 escaped 形式也不算。Raw-text 內的 tag-like 字串不會污染關閉後的正常 flow；
   設定頁會自我修復遺失頁面，頁面 ID 寫入失敗則回滾新頁。頁面分析與 REST 共用每分鐘 30 次
   預算，查看全部由落地頁單點記錄，不重複送出 client log。
-- 公開 query／suggest／log 與 B 頁分析改用 plugin-owned 非 transient 的持久限流列，並在
+- 公開 query／suggest／log 與 B 頁搜尋／分析改用 plugin-owned 非 transient 的持久限流列，並在
   per-counter MySQL advisory lock 內以直接 DB read、整筆原子 upsert 及 exact readback 決策；
   transient 提早消失不再重置額度。鎖忙、資料庫／state 讀寫不明或鎖釋放失敗皆 fail closed；
-  B 頁只略過分析，不影響已完成的搜尋結果呈現。Client identity 使用 site-keyed HMAC，IPv6
+  REST 與 B 頁共用同一個每分鐘 60 次 query 預算，B 頁在任何 COUNT、內容查詢或搜尋 cache
+  讀寫前先取得額度；額度耗盡或權威不明時顯示固定稍後再試狀態且不執行搜尋。Client identity 使用 site-keyed HMAC，IPv6
   privacy address 依 /64 聚合。每日 cron 以 completion-aware bounded multi-batch current-value
   DELETE 獨立清理 canonical 過期列；滿額 backlog 不假報完成，也不會用舊名單刪掉剛刷新 counter。
 - 分析的 SKU／ISBN／EAN／UPC／MPN／型號／料號辨識改為 token-local byte span；只豁免完整位於
@@ -33,10 +34,14 @@
   fail closed，晚到的舊 generation 寫入會移除。已提交的後台變更仍以固定警示如實標示 cache
   可能延遲更新。
 - 分析 receipt 的訪客身分改綁簽發時間；跨 UTC 午夜但仍在有效期內的同一 receipt 維持同一
-  去重身分，且線上 wire version、HMAC、期限與舊 v1 receipt 相容性不變。
+  去重身分。公開 wire 升為 v2：HMAC 以 domain-separated、length-delimited 形式綁定完整且未截斷的
+  搜尋 ingress，但 payload 不含原字串、digest、admission verdict 或拒絕原因。`/log` 需同時驗證
+  canonical query 與 exact ingress；query-only v1 receipt 在公開寫入面固定中性拒絕。
 - 最近搜尋、自動熱門詞與 B 模式分析只以實際商品數為正向依據；filter-final 商品必須至少有
   一筆具可見 title 與安全 URL 的可渲染項目才可授權商品總數，空白／畸形項目不會進入正向 receipt 或
-  搜尋記憶。分類／文章仍可呈現及留下可辨識的零商品分析，但不會進入商品搜尋記憶。
+  搜尋記憶。最近搜尋改只接受伺服器依完整 ingress 與商品正向結果核准的 bounded term，寫入新的
+  `ysss_recent_v2`；不遷移無法驗證的舊資料，且 null／object／number／超長或無效 Unicode 成員只會
+  被忽略，不會讓建議面板進入錯誤狀態。分類／文章仍可呈現及留下可辨識的零商品分析，但不會進入商品搜尋記憶。
 
 ### Compatibility / Release Boundary
 

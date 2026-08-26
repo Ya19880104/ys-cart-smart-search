@@ -615,6 +615,33 @@ ysss_test('mixed page analytics use the exact product total only', static functi
     ysss_assert_same(1, $data['has_results'] ?? null);
 });
 
+ysss_test('B page searches a noisy full ingress but excludes it from analytics', static function (): void {
+    ysss_pagination_fixture(1);
+    $_GET['ys_ec_search'] = str_repeat('nova ', 20) . 'utm_source=tail';
+    $_GET['ys_ss_page'] = '1';
+
+    $html = YSSsResultsPage::render();
+
+    ysss_assert_contains('Nova Product 1', $html, 'Full-ingress analytics policy blocked the legitimate page search');
+    ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'B page discarded the noisy tail before analytics admission');
+});
+
+ysss_test('B page records a recognizable long ingress but stores only its bounded canonical query', static function (): void {
+    ysss_pagination_fixture(1);
+    $raw = str_repeat('Nova wool ', 12) . 'ISBN-9781234567890';
+    $_GET['ys_ec_search'] = $raw;
+    $_GET['ys_ss_page'] = '1';
+
+    $html = YSSsResultsPage::render();
+
+    ysss_assert_contains('Nova Product 1', $html);
+    ysss_assert_same(1, count($GLOBALS['wpdb']->inserts), 'Recognizable long B-page ingress lost analytics');
+    $stored = $GLOBALS['wpdb']->inserts[0]['data'] ?? [];
+    ysss_assert_true(strlen((string) ($stored['query_norm'] ?? '')) > 0 && strlen((string) ($stored['query_norm'] ?? '')) <= 100);
+    ysss_assert_same($stored['query_norm'] ?? null, strtolower((string) ($stored['query_raw'] ?? '')));
+    ysss_assert_false(str_contains((string) ($stored['query_raw'] ?? ''), 'ISBN-9781234567890'), 'Full B-page ingress tail leaked into analytics storage');
+});
+
 ysss_test('distinct page-one terms share the thirty-per-minute log budget without affecting rendering', static function (): void {
     ysss_pagination_fixture(1);
     $terms = [
@@ -659,7 +686,7 @@ ysss_test('distinct page-one terms share the thirty-per-minute log budget withou
     ysss_assert_same([], array_values($transientRateWrites), 'Page analytics still wrote transient rate authority');
 });
 
-ysss_test('unavailable page rate authority preserves rendering with zero analytics work', static function (): void {
+ysss_test('unavailable page query authority stops before all search and analytics work', static function (): void {
     $db = ysss_pagination_fixture(1);
     $baseGetVar = $db->getVarHandler;
     $db->getVarHandler = static function (string $sql, YSSsFakeWpdb $wpdb) use ($baseGetVar): mixed {
@@ -673,8 +700,39 @@ ysss_test('unavailable page rate authority preserves rendering with zero analyti
 
     $html = YSSsResultsPage::render();
 
-    ysss_assert_contains('Nova Product 1', $html, 'Rate authority failure changed page rendering');
+    ysss_assert_contains('請求過於頻繁，請稍後再試。', $html, 'Rate authority failure did not render the fixed safe status');
+    ysss_assert_false(str_contains($html, 'Nova Product 1'), 'Rate authority failure still rendered a product');
+    ysss_assert_same([], ysss_pagination_count_sql($db), 'Rate authority failure reached product COUNT');
+    ysss_assert_same([], ysss_pagination_row_sql($db), 'Rate authority failure reached product row SQL');
+    ysss_assert_same([], YSSsWpFake::$transientSets, 'Rate authority failure published a search cache');
     ysss_assert_same([], $GLOBALS['wpdb']->inserts, 'Rate authority failure reached page analytics insert');
+});
+
+ysss_test('B page shares the sixty-request query budget and stops request sixty-one before search', static function (): void {
+    $db = ysss_pagination_fixture(1);
+    $lastHtml = '';
+    for ($index = 1; $index <= 61; ++$index) {
+        $_GET['ys_ec_search'] = 'nova bounded ' . $index;
+        $_GET['ys_ss_page'] = '1';
+        $lastHtml = YSSsResultsPage::render();
+    }
+
+    ysss_assert_contains('請求過於頻繁，請稍後再試。', $lastHtml, 'The sixty-first request did not hit the shared query budget');
+    ysss_assert_false(str_contains($lastHtml, 'Nova Product 1'), 'The sixty-first request rendered cached or searched content');
+    ysss_assert_same(60, count(ysss_pagination_count_sql($db)), 'Query budget did not bound product COUNT work');
+    ysss_assert_same(60, count(ysss_pagination_row_sql($db)), 'Query budget did not bound product row work');
+    $searchCacheWrites = array_values(array_filter(
+        YSSsWpFake::$transientSets,
+        static fn(array $write): bool => str_starts_with((string) ($write['key'] ?? ''), 'ys_ss_sp_')
+    ));
+    ysss_assert_same(60, count($searchCacheWrites), 'Query budget did not bound unique transient allocation');
+    $queryRows = array_filter(
+        YSSsWpFake::$options,
+        static fn(mixed $value, string $key): bool => str_starts_with($key, 'ys_ss_rate_v1_query_'),
+        ARRAY_FILTER_USE_BOTH
+    );
+    ysss_assert_same(1, count($queryRows), 'B page used a separate or missing query budget row');
+    ysss_assert_true(1 === preg_match('/\Av1:[0-9]+:60\z/D', (string) reset($queryRows)), 'Shared query row did not stop at sixty');
 });
 
 ysss_test('a malicious deep request resolved to page one cannot manufacture page-one analytics', static function (): void {

@@ -35,17 +35,24 @@ final class YSSsQueryRepository {
 	 * 600 秒內已記錄者略過（跨來源），因此公開 /log 端點即使被重複呼叫也無法灌爆搜尋分析
 	 *（前端 sessionStorage 去重僅為體驗、非安全邊界）。失敗絕不影響搜尋主流程。
 	 */
-	public static function log( string $raw, int $results_total, string $content_types, string $source, string $visitor_hash ): void {
+	public static function log(
+		string $query,
+		string $admission_ingress,
+		int $results_total,
+		string $content_types,
+		string $source,
+		string $visitor_hash
+	): void {
 		global $wpdb;
 
-		$norm = self::normalize( $raw );
+		$norm = self::normalize( $query );
 		if ( '' === $norm ) {
 			return;
 		}
 
 		// Analytics-only admission：搜尋本身由 prepared SQL／escaping 保護；這裡只拒絕攻擊、
 		// 已知 query parameters 與高信心機器亂數，避免污染報表與自動熱門詞。
-		if ( ! YSSsAnalyticsAdmission::should_record( $raw, $results_total ) ) {
+		if ( ! YSSsAnalyticsAdmission::should_record( $admission_ingress, $results_total ) ) {
 			return;
 		}
 
@@ -76,7 +83,7 @@ final class YSSsQueryRepository {
 
 			$wpdb->insert( $table, [
 				'query_norm'    => $norm,
-				'query_raw'     => YSSsText::truncate_chars( trim( $raw ), 150 ),
+				'query_raw'     => YSSsText::truncate_chars( trim( $query ), 150 ),
 				'results_total' => max( 0, $results_total ),
 				'has_results'   => $results_total > 0 ? 1 : 0,
 				'content_types' => substr( $content_types, 0, 60 ),
@@ -93,8 +100,14 @@ final class YSSsQueryRepository {
 	 * 結果頁（B 模式）server 端記錄（source='page'）。去重已下沉至 log()
 	 *（同訪客 + 同詞 600 秒跨來源），此處僅標記來源、不再重複去重邏輯。
 	 */
-	public static function log_page( string $raw, int $results_total, string $content_types, string $visitor_hash ): void {
-		self::log( $raw, $results_total, $content_types, 'page', $visitor_hash );
+	public static function log_page(
+		string $query,
+		string $admission_ingress,
+		int $results_total,
+		string $content_types,
+		string $visitor_hash
+	): void {
+		self::log( $query, $admission_ingress, $results_total, $content_types, 'page', $visitor_hash );
 	}
 
 	/**

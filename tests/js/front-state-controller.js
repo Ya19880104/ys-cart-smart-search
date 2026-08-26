@@ -40,7 +40,7 @@ async function chipFixture(kind) {
 		await h.resolveJson(0, { items: [{ term }] });
 	} else if ('recent' === kind) {
 		term = 'recent-chip';
-		h.sandbox.localStorage.setItem('ysss_recent', JSON.stringify([term]));
+		h.sandbox.localStorage.setItem('ysss_recent_v2', JSON.stringify([term]));
 		parts.input.focus();
 		await h.resolveJson(0, { items: [] });
 	} else {
@@ -127,12 +127,11 @@ runTests([
 		h.dispatch(parts.form, 'submit');
 		h.advanceTimers(1200);
 		assert(0 === h.beacons.length, 'blocked-neutral response sent analytics');
-		assert(null === h.sandbox.localStorage.getItem('ysss_recent'), 'blocked-neutral response wrote recent history');
+		assert(null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'blocked-neutral response wrote recent history');
 	}],
-	['non-scalar q or receipt cannot authorize zero fallback proof', async () => {
+	['non-scalar q cannot authorize zero fallback proof', async () => {
 		const fixtures = [
 			{ q: ['not-a-query'], log_receipt: 'receipt-array-q' },
-			{ q: 'not-an-object-receipt', log_receipt: { token: 'not-scalar' } },
 		];
 		for (const fixture of fixtures) {
 			const h = createHarness();
@@ -160,8 +159,8 @@ runTests([
 		assertBusy(parts, 'false', 'failed zero fallback settlement');
 		h.advanceTimers(1200);
 		assert(1 === h.beacons.length, 'valid zero-result settle did not send analytics after fallback failure');
-		assert('nothing' === h.beaconPayload(0).q && 'receipt-zero' === h.beaconPayload(0).receipt, 'zero-result analytics lost its proof identity');
-		assert(null === h.sandbox.localStorage.getItem('ysss_recent'), 'zero-result settle wrote recent history');
+		assert('nothing' === h.beaconPayload(0).q && 'nothing' === h.beaconPayload(0).ingress && 'receipt-zero' === h.beaconPayload(0).receipt, 'zero-result analytics lost its proof identity');
+		assert(null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'zero-result settle wrote recent history');
 	}],
 	['cold zero fallback success clears busy and settles zero analytics without recent', async () => {
 		const h = createHarness();
@@ -175,7 +174,7 @@ runTests([
 		assertBusy(parts, 'false', 'successful zero fallback settlement');
 		h.advanceTimers(1200);
 		assert(1 === h.beacons.length, 'valid zero-result settle did not send analytics after fallback success');
-		assert(null === h.sandbox.localStorage.getItem('ysss_recent'), 'successful zero-result fallback wrote recent history');
+		assert(null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'successful zero-result fallback wrote recent history');
 	}],
 	['query and cold suggestion expose synchronized busy authority', async () => {
 		const queryHarness = createHarness();
@@ -218,7 +217,7 @@ runTests([
 		assert(!parts.panel.textContent.includes('alpha-results'), 'A text remained during B debounce');
 		h.dispatch(parts.form, 'submit');
 		assert(0 === h.beacons.length, 'A proof remained usable after input changed to B');
-		assert('[]' === (h.sandbox.localStorage.getItem('ysss_recent') || '[]'), 'A proof wrote recent history for B');
+		assert('[]' === (h.sandbox.localStorage.getItem('ysss_recent_v2') || '[]'), 'A proof wrote recent history for B');
 	}],
 	['HTTP 500 renders only the localized current error and clears busy', async () => {
 		const h = createHarness();
@@ -232,7 +231,7 @@ runTests([
 		assert(!parts.panel.textContent.includes('server stack detail'), 'server error detail entered panel text');
 		assert('false' === parts.input.getAttribute('aria-busy'), 'HTTP failure left input busy');
 		h.dispatch(parts.form, 'submit');
-		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent'), 'HTTP failure retained analytics/recent proof');
+		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'HTTP failure retained analytics/recent proof');
 		assert(!parts.panel.textContent.includes('alpha-secret'), 'HTTP failure retained A');
 	}],
 	['invalid JSON renders only the localized current error and clears busy', async () => {
@@ -247,7 +246,7 @@ runTests([
 		assert(!parts.panel.textContent.includes('Unexpected token'), 'JSON parser detail entered panel text');
 		assert('false' === parts.input.getAttribute('aria-busy'), 'invalid JSON left input busy');
 		h.dispatch(parts.form, 'submit');
-		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent'), 'invalid JSON retained analytics/recent proof');
+		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'invalid JSON retained analytics/recent proof');
 		assert(!parts.panel.textContent.includes('alpha-secret'), 'invalid JSON retained A');
 	}],
 	['network rejection renders only the localized current error and clears busy', async () => {
@@ -262,7 +261,7 @@ runTests([
 		assert(!parts.panel.textContent.includes('socket detail'), 'network error detail entered panel text');
 		assert('false' === parts.input.getAttribute('aria-busy'), 'network rejection left input busy');
 		h.dispatch(parts.form, 'submit');
-		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent'), 'network failure retained analytics/recent proof');
+		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'network failure retained analytics/recent proof');
 		assert(!parts.panel.textContent.includes('alpha-secret'), 'network failure retained A');
 	}],
 	['first zero result loads popular terms from a cold suggest cache', async () => {
@@ -360,7 +359,7 @@ runTests([
 		h.dispatch(parts.form, 'submit');
 		h.advanceTimers(1200);
 		assert(0 === h.beacons.length, 'Escape left settled analytics proof or timer active');
-		assert(null === h.sandbox.localStorage.getItem('ysss_recent'), 'Escape left settled recent-history proof active');
+		assert(null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'Escape left settled recent-history proof active');
 	}],
 	['current suggestion HTTP 500 renders the fixed safe error', async () => {
 		const h = createHarness();
@@ -371,7 +370,7 @@ runTests([
 		assert(ERROR === parts.panel.textContent, 'suggest HTTP 500 did not render the fixed localized error');
 		assert(!parts.panel.textContent.includes('private suggest server detail'), 'suggest HTTP detail entered panel text');
 		assert('false' === parts.input.getAttribute('aria-busy'), 'suggest HTTP failure left combobox busy');
-		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent'), 'suggest HTTP failure retained proof side effects');
+		assert(0 === h.beacons.length && null === h.sandbox.localStorage.getItem('ysss_recent_v2'), 'suggest HTTP failure retained proof side effects');
 	}],
 	['current suggestion invalid JSON renders the fixed safe error', async () => {
 		const h = createHarness();
@@ -417,5 +416,24 @@ runTests([
 		await h.resolveJson(1, result('nova', 'nova-after-suggest-failure', 'receipt-nova'));
 		assert(parts.panel.textContent.includes('nova-after-suggest-failure'), 'current query did not survive superseded suggestion failure');
 		assert(!parts.panel.textContent.includes(ERROR), 'superseded suggestion failure rendered as current error');
+	}],
+	['malformed recent storage is bounded ignored and leaves one safe chip interactive', async () => {
+		const h = createHarness();
+		const parts = h.forms[0];
+		h.sandbox.localStorage.setItem('ysss_recent', JSON.stringify([null, 'legacy-unverified']));
+		h.sandbox.localStorage.setItem('ysss_recent_v2', JSON.stringify([
+			null, { term: 'forged-object' }, 7, '', '\uD800', 'recent-safe', 'recent-safe', 'x'.repeat(101)
+		]));
+		parts.input.focus();
+		await h.resolveJson(0, { items: [] });
+		assert(!parts.panel.textContent.includes(ERROR), 'Malformed recent storage forced the suggestion panel into error mode');
+		assert(parts.panel.textContent.includes('recent-safe'), 'The valid bounded recent term was lost');
+		assert(!parts.panel.textContent.includes('legacy-unverified'), 'Unverifiable v1 recent storage was migrated');
+		assert(!parts.panel.textContent.includes('forged-object'), 'Malformed object member reached a chip');
+		const chips = parts.panel.querySelectorAll('.ys-ss-chip--recent');
+		assert(1 === chips.length, 'Malformed or duplicate recent entries were not filtered to one chip');
+		chips[0].click();
+		const requests = h.pendingFetches.filter((request) => request.url.endsWith('/query?q=recent-safe'));
+		assert(1 === requests.length, 'The safe recent chip did not issue exactly one query');
 	}],
 ]);

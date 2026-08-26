@@ -84,6 +84,7 @@ final class YSSsSearchService {
 			'content_types'  => array_values( array_unique( $searched_types ) ),
 			'view_all'       => YSSsResultsPage::search_url( $norm ),
 			'log_receipt'    => '',
+			'recent_term'    => '',
 		];
 	}
 
@@ -101,6 +102,7 @@ final class YSSsSearchService {
 			'content_types'  => [],
 			'view_all'       => '',
 			'log_receipt'    => '',
+			'recent_term'    => '',
 		];
 	}
 

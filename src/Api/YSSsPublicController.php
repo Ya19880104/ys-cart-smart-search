@@ -11,6 +11,7 @@
 
 namespace YangSheep\SmartSearch\Api;
 
+use YangSheep\SmartSearch\Analytics\YSSsAnalyticsAdmission;
 use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Security\YSSsLogReceipt;
 use YangSheep\SmartSearch\Security\YSSsRateLimiter;
@@ -48,7 +49,7 @@ final class YSSsPublicController {
 	}
 
 	public function query( \WP_REST_Request $request ) {
-		if ( ! YSSsRateLimiter::allow( 'query', 60 ) ) {
+		if ( ! YSSsRateLimiter::allow_public_query() ) {
 			return new \WP_Error( 'ys_ss_rate_limited', __( '請求過於頻繁，請稍後再試。', 'ys-cart-smart-search' ), [ 'status' => 429 ] );
 		}
 
@@ -60,6 +61,7 @@ final class YSSsPublicController {
 		}
 
 		$q = $input['query'];
+		$raw = $input['raw'];
 		if ( '' === trim( $q ) ) {
 			return new \WP_Error( 'ys_ss_empty_query', __( '請輸入搜尋字詞。', 'ys-cart-smart-search' ), [ 'status' => 400 ] );
 		}
@@ -73,11 +75,14 @@ final class YSSsPublicController {
 		$visitor = YSSsRateLimiter::visitor_hash_at( $now );
 		$result['total']          = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['total'] ?? 0 ) ) );
 		$result['products_total'] = max( 0, min( YSSsLogReceipt::MAX_TOTAL, (int) ( $result['products_total'] ?? 0 ) ) );
-		$result['log_receipt'] = YSSsLogReceipt::issue(
+		$analytics_allowed = YSSsAnalyticsAdmission::should_record( $raw, (int) $result['products_total'] );
+		$result['recent_term'] = $analytics_allowed && $result['products_total'] > 0 ? $input['query'] : '';
+		$result['log_receipt'] = YSSsLogReceipt::issue_for_request(
 			(string) ( $result['q'] ?? '' ),
 			(int) ( $result['products_total'] ?? 0 ),
 			implode( ',', array_values( array_unique( $types ) ) ),
 			$visitor,
+			$raw,
 			$now
 		);
 
@@ -99,30 +104,41 @@ final class YSSsPublicController {
 			return new \WP_Error( 'ys_ss_rate_limited', __( '請求過於頻繁。', 'ys-cart-smart-search' ), [ 'status' => 429 ] );
 		}
 
-		$input = YSSsSearchInput::inspect( $request->get_param( 'q' ) );
+		$query_param   = $request->get_param( 'q' );
+		$ingress_param = $request->get_param( 'ingress' );
+		$source_param  = $request->get_param( 'source' );
+		$receipt_param = $request->get_param( 'receipt' );
+		if ( ! is_string( $query_param )
+			|| ! is_string( $ingress_param )
+			|| ( null !== $source_param && ! is_string( $source_param ) )
+			|| ! is_string( $receipt_param ) ) {
+			return rest_ensure_response( [ 'ok' => true ] );
+		}
+
+		$input = YSSsSearchInput::inspect( $ingress_param );
 		if ( $input['blocked'] ) {
 			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
-		$q = $input['query'];
-		if ( '' === trim( $q ) ) {
-			return rest_ensure_response( [ 'ok' => true ] );
-		}
-
-		$source_param  = $request->get_param( 'source' );
-		$receipt_param = $request->get_param( 'receipt' );
-		if ( ( null !== $source_param && ! is_string( $source_param ) ) || ! is_string( $receipt_param ) ) {
+		if ( '' === trim( $input['query'] ) || '' === trim( $query_param ) ) {
 			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
 		$source = 'popup' === $source_param ? 'popup' : 'bar';
-		$claims = YSSsLogReceipt::verify_for_request( $receipt_param, $q );
-		if ( null === $claims ) {
+		$claims = YSSsLogReceipt::verify_for_request( $receipt_param, $query_param, $input['raw'] );
+		if ( null === $claims || YSSsQueryRepository::normalize( $input['query'] ) !== $claims['query'] ) {
 			return rest_ensure_response( [ 'ok' => true ] );
 		}
 
 		try {
-			YSSsQueryRepository::log( $claims['query'], $claims['total'], $claims['content_types'], $source, $claims['visitor_hash'] );
+			YSSsQueryRepository::log(
+				$claims['query'],
+				$input['raw'],
+				$claims['total'],
+				$claims['content_types'],
+				$source,
+				$claims['visitor_hash']
+			);
 		} catch ( \Throwable $e ) {
 			// 分析旁路：任何寫入失敗都不回錯誤給前台。
 		}

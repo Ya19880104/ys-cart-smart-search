@@ -340,7 +340,12 @@ final class YSSsResultsPage {
 		}
 		YSSsShortcodes::ensure_assets();
 
-		$input = YSSsSearchInput::inspect( wp_unslash( $_GET['ys_ec_search'] ?? '' ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$has_query = array_key_exists( 'ys_ec_search', $_GET ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$raw       = wp_unslash( $_GET['ys_ec_search'] ?? '' ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$query_allowed = ! $has_query || YSSsRateLimiter::allow_public_query();
+		$input = $query_allowed
+			? YSSsSearchInput::inspect( $raw )
+			: [ 'blocked' => true, 'query' => '', 'raw' => '' ];
 		$query = $input['query'];
 
 		// 分頁呈現與分析授權刻意分離：service 可把任意整數解析到可見頁，但只有原始
@@ -361,6 +366,11 @@ final class YSSsResultsPage {
 		echo '<div class="ys-ss-results">';
 		echo '<div class="ys-ss-results__searchbar">' . YSSsShortcodes::render_bar( [ 'placeholder' => __( '搜尋商品、分類、文章…', 'ys-cart-smart-search' ) ] ) . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- 已自含跳脫。
 
+		if ( ! $query_allowed ) {
+			echo '<p class="ys-ss-results__hint">' . esc_html__( '請求過於頻繁，請稍後再試。', 'ys-cart-smart-search' ) . '</p></div>';
+			return (string) ob_get_clean();
+		}
+
 		if ( $input['blocked'] ) {
 			echo '<p class="ys-ss-results__hint">' . esc_html__( '沒有符合的結果。', 'ys-cart-smart-search' ) . '</p></div>';
 			return (string) ob_get_clean();
@@ -378,7 +388,7 @@ final class YSSsResultsPage {
 			try {
 				if ( YSSsRateLimiter::allow( 'log', 30 ) ) {
 					$total_for_log = (int) $res['products_total'];
-					YSSsQueryRepository::log_page( $query, $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
+					YSSsQueryRepository::log_page( $query, $input['raw'], $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
 				}
 			} catch ( \Throwable $e ) {
 				// 分析旁路：寫入失敗不影響頁面。

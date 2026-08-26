@@ -13,7 +13,7 @@
 	}
 
 	var CFG = window.ysSsFront;
-	var RECENT_KEY = 'ysss_recent';
+	var RECENT_KEY = 'ysss_recent_v2';
 	var LOGGED_KEY = 'ysss_logged';
 	var suggestCache = null;
 	var suggestPromise = null;
@@ -49,14 +49,29 @@
 		parent.appendChild(document.createTextNode(text.slice(index + query.length)));
 	}
 
+	function boundedTerm(value) {
+		if (typeof value !== 'string') { return ''; }
+		var term = value.trim();
+		if (!term || Array.from(term).length > 100) { return ''; }
+		try { encodeURIComponent(term); } catch (error) { return ''; }
+		return term;
+	}
+
 	function recentList() {
 		try {
 			var raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-			return Array.isArray(raw) ? raw.slice(0, 5) : [];
+			if (!Array.isArray(raw)) { return []; }
+			var result = [];
+			raw.slice(0, 20).forEach(function (value) {
+				var term = boundedTerm(value);
+				if (term && result.indexOf(term) < 0 && result.length < 5) { result.push(term); }
+			});
+			return result;
 		} catch (error) { return []; }
 	}
 
 	function recentPush(term) {
+		term = boundedTerm(term);
 		if (!CFG.recentEnabled || !term) { return; }
 		try {
 			var list = recentList().filter(function (item) { return item !== term; });
@@ -66,9 +81,9 @@
 	}
 
 	/** 行為紀錄（fire-and-forget；同詞 10 分鐘去重）。 */
-	function logQuery(term, receipt, source) {
+	function logQuery(term, ingress, receipt, source) {
 		var normalized = (term || '').trim().toLowerCase();
-		if (normalized.length < 1 || typeof receipt !== 'string' || !receipt) { return; }
+		if (normalized.length < 1 || typeof ingress !== 'string' || !ingress || typeof receipt !== 'string' || !receipt) { return; }
 		try {
 			var map = JSON.parse(sessionStorage.getItem(LOGGED_KEY) || '{}');
 			var now = Date.now();
@@ -77,7 +92,7 @@
 			sessionStorage.setItem(LOGGED_KEY, JSON.stringify(map));
 		} catch (error) { /* 仍嘗試送出 */ }
 
-		var payload = JSON.stringify({ q: term, receipt: receipt, source: source });
+		var payload = JSON.stringify({ q: term, ingress: ingress, receipt: receipt, source: source });
 		var url = CFG.restUrl + '/log';
 		if (navigator.sendBeacon) {
 			navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
@@ -201,7 +216,8 @@
 			if (!parent) { section.appendChild(el('div', 'ys-ss-suggest__title', title)); }
 			var wrap = el('div', 'ys-ss-suggest__chips');
 			terms.forEach(function (termData) {
-				var term = termData.term || termData;
+				var term = boundedTerm(typeof termData === 'string' ? termData : (termData && termData.term));
+				if (!term) { return; }
 				var chip = el('button', 'ys-ss-chip' + (extraClass ? ' ' + extraClass : ''), term);
 				chip.type = 'button';
 				chip.addEventListener('click', function (event) { startChipSearch(term, event); });
@@ -235,6 +251,7 @@
 			var data = payload.data || {};
 			var groups = data.groups || [];
 			var logTerm = data.q || '';
+			var logIngress = payload.query || '';
 			var receipt = data.log_receipt || '';
 			groups.forEach(function (group) {
 				var section = el('div', 'ys-ss-group ys-ss-group--' + group.type);
@@ -243,7 +260,7 @@
 				(group.items || []).forEach(function (item) {
 					var link = el('a', 'ys-ss-item');
 					link.href = item.url;
-					link.addEventListener('click', function () { logQuery(logTerm, receipt, sourceOf(form)); });
+					link.addEventListener('click', function () { logQuery(logTerm, logIngress, receipt, sourceOf(form)); });
 					if (item.image) {
 						var image = el('img', 'ys-ss-item__img');
 						image.src = item.image;
@@ -273,7 +290,7 @@
 			var viewAll = el('a', 'ys-ss-viewall', CFG.i18n.viewAll);
 			viewAll.href = data.view_all || CFG.shopUrl;
 			if (CFG.resultsMode !== 'page') {
-				viewAll.addEventListener('click', function () { logQuery(logTerm, receipt, sourceOf(form)); });
+				viewAll.addEventListener('click', function () { logQuery(logTerm, logIngress, receipt, sourceOf(form)); });
 			}
 			panel.appendChild(viewAll);
 			visible = true;
@@ -353,8 +370,7 @@
 				if (data
 					&& typeof data.q === 'string'
 					&& data.q
-					&& typeof data.log_receipt === 'string'
-					&& data.log_receipt) {
+				) {
 					var productsTotal = data.products_total;
 					if (typeof productsTotal !== 'number'
 						|| !Number.isFinite(productsTotal)
@@ -365,9 +381,10 @@
 					state.proof = {
 						input: query,
 						query: data.q,
-						receipt: data.log_receipt,
+						receipt: typeof data.log_receipt === 'string' ? data.log_receipt : '',
 						total: Math.max(0, Number(data.total) || 0),
-						productsTotal: productsTotal
+						productsTotal: productsTotal,
+						recentTerm: boundedTerm(data.recent_term)
 					};
 					form._ysSsLogProof = state.proof;
 				}
@@ -404,7 +421,7 @@
 					state.settleTimer = setTimeout(function () {
 						state.settleTimer = null;
 						if (isCurrent(form, token, query, settleMode) && state.proof === proof) {
-							logQuery(proof.query, proof.receipt, sourceOf(form));
+							logQuery(proof.query, proof.input, proof.receipt, sourceOf(form));
 						}
 					}, 1200);
 				}
@@ -461,8 +478,8 @@
 			if (!query) { return; }
 			var proof = controller(form).proof;
 			if (!proof || proof.input !== query || !proof.receipt) { return; }
-			if (proof.productsTotal > 0) { recentPush(query); }
-			if (CFG.resultsMode !== 'page') { logQuery(proof.query, proof.receipt, sourceOf(form)); }
+			if (proof.productsTotal > 0) { recentPush(proof.recentTerm); }
+			if (CFG.resultsMode !== 'page') { logQuery(proof.query, proof.input, proof.receipt, sourceOf(form)); }
 		});
 
 		input.addEventListener('keydown', function (event) {
