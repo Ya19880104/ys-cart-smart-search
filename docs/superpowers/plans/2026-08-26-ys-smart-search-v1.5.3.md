@@ -4,7 +4,7 @@
 
 **Goal:** Release v1.5.3 as one bounded search-interaction and data-integrity batch without reopening the v1.5.2 security and cleanup work.
 
-**Architecture:** Keep existing REST routes, database schema, and receipt wire version. Add one per-form front controller, make admin mutations and suggestion invalidation report authoritative outcomes, resolve B-mode pages against real totals, and make analytics/receipt identity decisions from token-local and signed-time data. All production changes are test-first and converge into one immutable candidate.
+**Architecture:** Keep existing REST routes, database schema, and receipt wire version. Add one per-form front controller, make admin mutations and suggestion invalidation report authoritative outcomes, resolve B-mode pages against real totals, and make analytics/receipt identity decisions from token-local, product-positive, and signed-time data. All production changes are test-first and converge into one immutable candidate.
 
 **Tech Stack:** WordPress/PHP 8.1+, vanilla JavaScript, WordPress REST, `$wpdb`, Node VM behavior harness, PowerShell release verification, Git/GitHub CLI.
 
@@ -16,6 +16,7 @@
 - Work directly on canonical `main`, as explicitly authorized; do not reset, stash, clean, rebase, merge, or overwrite unrelated work.
 - No schema, public REST URL, external dependency, new search feature, broader attack heuristic, or full-clear background architecture.
 - v1.5.0-v1.5.2 injection, neutral response, positive-recent, exact/full cleanup, receipt HMAC, and maintenance-lock contracts remain regression requirements.
+- "Positive" for browser recent history and automatic terms means an actual product result; category/post-only results remain visible and analytically recordable but are zero-product events.
 - Development uses focused RED/GREEN commands; run the complete suite only after the entire batch and version metadata are ready.
 - Only `dev-newecommerce.wppro.cloud` may receive the exact candidate. Hub, S3, production/customer sites, `dev-checkout`, and `dev-yscart` GUI remain forbidden without new authorization.
 - Never store or echo credentials or private-key bytes. Prefer an existing AI/YSAI SSH key at the test-site stage after matching its public identity.
@@ -385,16 +386,80 @@ fix: bind analytics receipts to issue day
 
 ---
 
+### Task 4B: Product-only positive memory authority
+
+**Files:**
+- Modify: `tests/behavior/log-receipt-behavior.php`
+- Modify: `tests/behavior/search-input-behavior.php`
+- Modify: `tests/js/front-receipt-race.js`
+- Modify: `tests/js/front-state-controller.js`
+- Modify: `tests/js/front-accessibility.js`
+- Modify: `src/Services/YSSsSearchService.php`
+- Modify: `src/Api/YSSsPublicController.php`
+- Modify: `src/Security/YSSsLogReceipt.php` (documentation only)
+- Modify: `assets/js/ys-ss-front.js`
+
+**Interfaces:**
+- Consumes: filter-final grouped results, existing aggregate display total, receipt v1 claim `t`, and front proof/recent behavior.
+- Produces: additive `products_total`, product-count receipt authority, and fail-closed browser recent eligibility.
+
+- [ ] **Step 1: Write product-positive RED cases**
+
+Prove with real query/controller behavior that category/post-only results keep aggregate `total > 0` but expose `products_total=0` and sign receipt `total=0`; product plus category preserves aggregate total while signing only the product count. Prove a filter that removes product items revokes product positivity, a trusted filter adding a nonempty product group grants it, and a product group with only a forged positive `total` but empty `items` does not.
+
+Update the blocked empty-result shape to include `products_total=0`. In production front-JS tests, prove `total>0/products_total=0` still retains a valid analytics receipt but cannot write browser recent history, while `products_total>0` keeps exact positive recent behavior. Missing/non-numeric `products_total` must fail closed to zero.
+
+- [ ] **Step 2: Run focused RED**
+
+```powershell
+php tests/run.php behavior/log-receipt-behavior.php behavior/search-input-behavior.php js/front-receipt-race.js js/front-state-controller.js js/front-accessibility.js
+```
+
+The meaningful RED must demonstrate aggregate category/post counts currently grant product-positive receipt/recent authority. Fixture-shape updates alone are not RED evidence.
+
+- [ ] **Step 3: Implement the split authority**
+
+After `ys_ss_result_groups`, retain existing aggregate `total` and calculate `products_total` only from array groups whose exact type is `products` and whose `items` is a nonempty array. Each product group contributes `max(count(items), max(0, (int) total))`; sum groups and bound both totals independently in `YSSsPublicController`.
+
+Issue the unchanged v1 receipt with `products_total` as claim `t`; do not add `pt`, change TTL, or change HMAC/visitor verification. The REST response retains aggregate `total` and adds `products_total`. Front proof uses finite nonnegative `products_total` with no fallback to aggregate `total`; zero-product proof may still log analytics, but only a positive product count enters recent history.
+
+B-mode product-only logging is closed in Task 6 while `YSSsResultsPage` is already being edited for canonical pagination.
+
+- [ ] **Step 4: Run focused GREEN and syntax checks**
+
+```powershell
+php tests/run.php behavior/log-receipt-behavior.php behavior/search-input-behavior.php js/front-receipt-race.js js/front-state-controller.js js/front-accessibility.js
+php -l src/Services/YSSsSearchService.php
+php -l src/Api/YSSsPublicController.php
+php -l src/Security/YSSsLogReceipt.php
+node --check assets/js/ys-ss-front.js
+git diff --check
+```
+
+- [ ] **Step 5: Commit**
+
+```text
+fix: require product results for search memory
+```
+
+---
+
 ### Task 5: Fail-closed suggestion invalidation and honest keyword CRUD
 
 **Files:**
 - Create: `tests/behavior/keyword-mutation-behavior.php`
+- Create: `tests/behavior/cron-invalidation-behavior.php`
 - Create: `tests/js/admin-keyword-feedback.js`
+- Create: `tests/support/admin-js-harness.js`
 - Modify: `tests/bootstrap.php`
 - Modify: `tests/behavior/suggestion-cache-behavior.php`
+- Modify: `tests/behavior/admin-purge-mode-behavior.php`
+- Modify: `tests/js/admin-delete-feedback.js`
+- Modify: `tests/js/admin-purge-feedback.js`
 - Modify: `src/Services/YSSsSuggestService.php`
 - Modify: `src/Database/YSSsKeywordRepository.php`
 - Modify: `src/Api/YSSsAdminController.php`
+- Modify: `src/Cron/YSSsCronBridge.php`
 - Modify: `assets/js/ys-ss-admin.js`
 
 **Interfaces:**
@@ -403,7 +468,7 @@ fix: bind analytics receipts to issue day
 
 - [ ] **Step 1: Extend fakes only as required by real boundaries**
 
-Add resettable option handlers to `YSSsWpFake` so tests can make `update_option()` and `add_option()` fail or interleave while retaining current defaults. Extend the fake `$wpdb` insert/update/delete methods with resettable handlers, recorded arguments, and real `insert_id` reset semantics. Do not put test-only methods in production classes.
+Add resettable option handlers and access logs to `YSSsWpFake` so tests can make `add_option()`, `update_option()`, and `delete_option()` fail or interleave while retaining current defaults and recording `autoload`. Add transient get/set/delete handlers and access logs. Extend the fake `$wpdb` insert/update/delete methods with resettable handlers, recorded arguments, and real `insert_id` reset semantics. Add only the REST-fake methods and boolean sanitizer required by the production controller (`has_param()`, `get_json_params()`, `rest_sanitize_boolean()`). Do not put test-only methods in production classes.
 
 - [ ] **Step 2: Write failing cache tests**
 
@@ -427,12 +492,14 @@ tombstone option is created with autoload=false
 
 `admin-keyword-feedback.js` must drive add, edit, sort, toggle, and delete through the production script. For HTTP 500 and network rejection, assert authoritative values and controls are restored, the fixed local message appears, and fixture text `SECRET SQL` never appears. Prove duplicate events while one operation is pending do not send a duplicate mutation and an older completion cannot redraw after a newer queued operation.
 
+Use one shared test-only admin harness for keyword, exact-delete, and purge UI behavior. Include the analytics-page “設為關鍵字” write in the same production mutation runner; it is not a separate authority.
+
 - [ ] **Step 5: Run RED**
 
 Run:
 
 ```powershell
-php tests/run.php behavior/suggestion-cache-behavior.php behavior/keyword-mutation-behavior.php js/admin-keyword-feedback.js
+php tests/run.php behavior/suggestion-cache-behavior.php behavior/keyword-mutation-behavior.php behavior/admin-purge-mode-behavior.php behavior/cron-invalidation-behavior.php js/admin-keyword-feedback.js js/admin-delete-feedback.js js/admin-purge-feedback.js
 ```
 
 Expected: cache failure reads/writes stale data, technical keyword bytes are stripped, DB false paths report success, and admin controls do not recover.
@@ -469,7 +536,9 @@ private function mutation_response( array $payload ): \WP_REST_Response {
 
 Apply the same additive cache status to settings save, exact delete, expired purge, and full purge after their database mutation succeeds. In `YSSsCronBridge`, accept `rotated`/`bypass_fresh`; on `failed`, throw into the existing guarded cron error path and do not claim a successful rebuild.
 
-In `ys-ss-admin.js`, keep one authoritative `keywordItems` snapshot and serialize all keyword writes through `runKeywordMutation(path, options, control)`. Disable the active control, accept only server `items`, restore the snapshot on failure, use only fixed local messages, and surface `cache_warning` after committed success.
+Because `YSSsSettings::update()` intentionally has no boolean mutation ABI, the controller must re-read `YSSsSettings::all()` and compare it with the expected normalized settings before invalidating. A matching readback also treats an idempotent WordPress `update_option() === false` as success; a mismatching readback returns one fixed 500 with no invalidation.
+
+In `ys-ss-admin.js`, keep one authoritative `keywordItems` snapshot and serialize all keyword writes—including the analytics-page add action—through `runKeywordMutation(path, options, control)`. Disable the active control, accept only server `items`, restore the snapshot on failure, use only fixed local messages, and surface `cache_warning` after committed success. Settings save, exact delete, and both purge controls must also surface the additive warning without treating a committed mutation as failed.
 
 - [ ] **Step 8: Run focused GREEN and syntax checks**
 
@@ -477,10 +546,14 @@ Run:
 
 ```powershell
 php tests/run.php behavior/suggestion-cache-behavior.php behavior/keyword-mutation-behavior.php behavior/admin-purge-mode-behavior.php js/admin-keyword-feedback.js js/admin-delete-feedback.js js/admin-purge-feedback.js
+php tests/run.php behavior/cron-invalidation-behavior.php
+php -l tests/bootstrap.php
 php -l src/Services/YSSsSuggestService.php
 php -l src/Database/YSSsKeywordRepository.php
 php -l src/Api/YSSsAdminController.php
+php -l src/Cron/YSSsCronBridge.php
 node --check assets/js/ys-ss-admin.js
+git diff --check
 ```
 
 - [ ] **Step 9: Commit**
@@ -497,6 +570,7 @@ fix: make keyword mutations and cache state authoritative
 
 **Files:**
 - Create: `tests/behavior/results-pagination-behavior.php`
+- Modify: `tests/bootstrap.php`
 - Modify: `src/Services/YSSsSearchService.php`
 - Modify: `src/Frontend/YSSsResultsPage.php`
 
@@ -518,6 +592,8 @@ request=99 and canonical page=2 share canonical payload; no page99 transient
 total=5000, request=101 -> page=100, total_pages=100, OFFSET 2376
 products=0 plus category/post groups at request99 -> resolved page1 groups remain visible
 products last in group_order -> resolution still precedes category/post page decisions
+category/post-only page analytics -> row retained with results_total=0 and has_results=0
+products>0 page analytics -> has_results=1
 ```
 
 - [ ] **Step 2: Run RED**
@@ -539,7 +615,7 @@ private static function products_group_at_page( string $q, array $cfg, int $per_
 
 Bound request to `1..100`; check its cache; on miss obtain COUNT, calculate `total_pages=min(100,max(1,ceil(total/per_page)))` and resolved page, then check only the canonical key. Resolve before the `group_order` loop. Query rows with `(resolved_page - 1) * per_page`, store only the canonical result, and include `YS_SMART_SEARCH_VERSION` in the cache-key hash to prevent pre-v1.5.3 deep-page cache reuse.
 
-In `YSSsResultsPage`, accept `ys_ss_page` only when scalar; otherwise use `1`.
+In `YSSsResultsPage`, accept `ys_ss_page` only when scalar; otherwise use `1`. Keep the original-request page-1 analytics gate, but write only exact `products_total`; do not add category/post item counts. Extend the test-only `WP_Query` fake in `tests/bootstrap.php` with resettable posts and constructor-argument recording so products-last category/post behavior is executable without a production test seam. If the non-scalar case is already green on the local PHP runtime, record it as a defensive regression rather than RED evidence.
 
 - [ ] **Step 4: Run focused GREEN and lint**
 
@@ -547,6 +623,7 @@ Run:
 
 ```powershell
 php tests/run.php behavior/results-pagination-behavior.php
+php -l tests/bootstrap.php
 php -l src/Services/YSSsSearchService.php
 php -l src/Frontend/YSSsResultsPage.php
 ```
@@ -651,7 +728,7 @@ Verify real HTTP/browser/WordPress behavior for:
 ```text
 query/suggest race and fixed error recovery
 IME, Arrow/Enter/Escape, popup Tab trap and opener restoration
-positive proof/recent and zero-result popular fallback
+product-positive proof/recent, category/post-only no-memory, and zero-result popular fallback
 C++ <vector> manual keyword exact create/update/suggest/delete
 blocked keyword and unauthenticated admin no-write behavior
 B-mode request past last page resolves to the last page

@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Ship one bounded **Search Interaction and Data Integrity** release on the canonical `main` line. v1.5.3 must keep the v1.5.2 security and cleanup behavior intact while closing the confirmed UI-state, accessibility, admin-mutation, pagination, analytics-classification, cache-invalidation, and UTC-midnight receipt gaps.
+Ship one bounded **Search Interaction and Data Integrity** release on the canonical `main` line. v1.5.3 must keep the v1.5.2 security and cleanup behavior intact while closing the confirmed UI-state, accessibility, admin-mutation, pagination, analytics-classification, product-positive-memory, cache-invalidation, and UTC-midnight receipt gaps.
 
 The approved workflow is: recoverable branch at the released baseline, one coherent implementation batch, focused RED/GREEN tests while composing, one complete local candidate gate, `dev-newecommerce` runtime and GUI acceptance, then a GitHub Release using the identical tested ZIP.
 
@@ -24,7 +24,7 @@ Each rendered search form owns one controller state:
 ```text
 generation: monotonically increasing integer
 mode: idle | suggest | loading | results | error
-proof: null | { input, query, receipt, total }
+proof: null | { input, query, receipt, productsTotal }
 activeRequest: null | AbortController
 activeIndex: integer for aria-activedescendant
 settleTimer: null | timer
@@ -34,7 +34,7 @@ settleTimer: null | timer
 - Suggest, query, zero-result fallback, error, and loading render only when their captured generation is still current and the input/mode still matches.
 - HTTP non-2xx, invalid JSON, and network rejection render one fixed translated error. They never display a server detail, retain old results, create a proof, write recent terms, or trigger analytics.
 - A first zero-result response obtains popular terms through the same guarded suggestion loader. A late fallback cannot render after a newer input.
-- Existing positive-result proof, delayed log, recent-search, IME, A/list and B/page behavior remain unchanged.
+- Delayed log, IME, A/list and B/page behavior remain unchanged. Positive proof and browser recent history are narrowed to actual product results as defined in contract 8.
 
 ### 2. Combobox and popup accessibility share the same controller
 
@@ -52,10 +52,10 @@ settleTimer: null | timer
 - Repository insert, update, or delete failure returns a fixed 500 error with no SQL detail and no cache invalidation. `create()` must not reuse a stale `$wpdb->insert_id` after an insert failure.
 - The admin client serializes keyword mutations through one runner, disables the active control, keeps the last authoritative item list, restores it on error, shows a fixed success/failure/cache-warning message, and cannot let an older response overwrite a later operation.
 
-### 4. B-mode pages resolve against the actual last page
+### 4. B-mode pages resolve against the last visible page
 
 - Requested pages are bounded to `1..100`, then resolved to `1..total_pages` after the product count is known.
-- An out-of-range page returns the actual last page's products and pager rather than a non-zero total with an empty-result message.
+- An out-of-range page returns the last visible page within the existing 100-page safety cap rather than a non-zero total with an empty-result message.
 - Categories and posts use the resolved page, not the untrusted requested page.
 - The result and cache key expose the resolved page. Existing page-1-only analytics remains page-1-only.
 - No redirect is required; server-side clamping is the fixed contract.
@@ -95,6 +95,15 @@ YSSsSuggestService::INVALIDATION_FAILED       // neither authority write persist
 - Wire version stays `1`; v1.5.2 receipts issued before deployment remain verifiable until their original 120-second expiry.
 - Different IP/UA, expired tokens, future tokens, malformed tokens, and tampering remain neutral no-write responses.
 
+### 8. Automatic memory requires an actual product result
+
+- The public query response keeps existing aggregate `total` for display and adds `products_total` as a product-positive authority derived after the `ys_ss_result_groups` filter.
+- A product group contributes only when `type` is exactly `products` and it contains at least one visible item. Its contribution is `max(count(items), max(0, total))`; multiple visible product groups are summed and the controller applies the existing maximum bound.
+- Receipt wire version and keys remain unchanged. Signed claim `t` carries the server-derived product count, while the public response `total` remains the aggregate display count. No new `pt` claim or schema field is introduced.
+- The front controller uses `products_total` without falling back to aggregate `total`. A valid zero-product receipt may still send a recognizable analytics event, but only `products_total > 0` may enter browser recent history.
+- B-mode analytics writes its exact `products_total` and does not add category or post counts. A recognizable category/post-only query remains available to analytics as `results_total=0` and `has_results=0`, so it cannot feed automatic terms.
+- A missing or malformed `products_total` fails closed to zero for recent-history eligibility. Category/post rendering and the aggregate display total remain unchanged.
+
 ## Test strategy
 
 - Extend the existing runner with explicit relative-file selectors; no arguments preserve the current complete suite. A missing or outside-suite selector exits non-zero.
@@ -102,7 +111,7 @@ YSSsSuggestService::INVALIDATION_FAILED       // neither authority write persist
 - At candidate freeze, run one complete `php tests/run.php`, all first-party PHP lint, all first-party JS syntax checks, `php -n` Unicode fixtures, and `git diff --check`.
 - Obtain fresh whole-candidate API/UI and data-integrity reviews before packaging.
 - Build the candidate from the exact clean commit with one plugin root; exclude `.git`, `.github`, `.superpowers`, `docs/superpowers`, and `tests`.
-- On `dev-newecommerce`, run one consolidated matrix for query/suggest races, errors, IME, keyboard, popup focus, manual-keyword exact bytes/failures, B-mode deep page, analytics token cases, cache behavior, midnight fixture-equivalent runtime contracts, existing attack neutrality, positive-only recent terms, and console/network health.
+- On `dev-newecommerce`, run one consolidated matrix for query/suggest races, errors, IME, keyboard, popup focus, manual-keyword exact bytes/failures, B-mode deep page, analytics token cases, category/post-only versus product-positive memory, cache behavior, midnight fixture-equivalent runtime contracts, existing attack neutrality, and console/network health.
 
 ## Explicit non-goals
 
