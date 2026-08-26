@@ -36,6 +36,8 @@ $normalCases = [
     ['fullwidth parameter text', '𝐮𝐭𝐦_𝐬𝐨𝐮𝐫𝐜𝐞=𝐛𝐨𝐭', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO],
     ['emoji product lookup', '☕', 2, YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT],
     ['symbol-only zero-result lookup', '❤️', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO],
+    ['natural semicolon use phrase', 'coat; use cold water', 0, YSSsAnalyticsAdmission::ADMIT_HUMAN_ZERO],
+    ['natural semicolon show phrase', 'gift set; show collection', 2, YSSsAnalyticsAdmission::ADMIT_POSITIVE_RESULT],
 ];
 
 foreach ($normalCases as $index => [$label, $query, $total, $expected]) {

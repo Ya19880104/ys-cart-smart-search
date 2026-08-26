@@ -65,10 +65,32 @@ final class YSSsInjectionGuard {
 		$sql = preg_replace( '~/\*.*?\*/~su', ' ', $scan ) ?? $scan;
 		$sql = preg_replace( '/\s+/u', ' ', $sql ) ?? $sql;
 
-		// Stacked-query probes require the statement separator itself plus an explicit SQL command word.
-		// Natural product text such as "Drop Table 桌遊" remains searchable because it has no separator.
+		// Stacked-query probes require both a statement separator and a recognizable SQL statement
+		// shape. A bare natural-language verb after a semicolon is not enough to reject a search.
 		if ( preg_match(
-			'~;\s*(?:select|insert|replace|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|handler|load|set|show|describe|desc|explain|use|lock|unlock|begin|start|commit|rollback)\b~iu',
+			'~;\s*(?:
+				select\s+(?:@@[\p{L}\p{N}_$]+|[^;\r\n]{1,160}?\bfrom\b)
+				|insert\s+into\b
+				|replace\s+into\b
+				|update\s+`?[\p{L}\p{N}_.$-]+`?\s+set\b
+				|delete\s+from\b
+				|drop\s+(?:table|database|schema|view|index|trigger|procedure|function|event|user)\b
+				|alter\s+(?:table|database|schema|view|user)\b
+				|create\s+(?:table|database|schema|view|index|trigger|procedure|function|event|user)\b
+				|truncate\s+(?:table\s+)?`?[\p{L}\p{N}_.$-]+`?
+				|rename\s+(?:table|user)\b
+				|grant\s+[^;\r\n]{1,160}?\s+on\b
+				|revoke\s+[^;\r\n]{1,160}?\s+(?:on|from)\b
+				|call\s+`?[\p{L}\p{N}_.$-]+`?\s*\(
+				|handler\s+`?[\p{L}\p{N}_.$-]+`?\s+(?:open|read|close)\b
+				|load\s+(?:data|xml)\b
+				|set\s+(?:@@|@[\p{L}\p{N}_$]+|(?:global|session|local|transaction|names)\b|character\s+set\b)
+				|show\s+(?:databases|schemas|tables|table\s+status|columns|fields|indexes?|keys|create|variables|status|warnings|errors|grants|processlist|engines|plugins|events|triggers|procedure|function)\b
+				|explain\s+(?:select|insert|replace|update|delete)\b
+				|lock\s+tables\b
+				|unlock\s+tables\b
+				|start\s+transaction\b
+			)~ixu',
 			$sql
 		) ) {
 			return true;

@@ -98,5 +98,10 @@ return [
         'backtick technical title' => 'JavaScript `fetch` guide',
         'family emoji ZWJ title' => '👨‍👩‍👧‍👦 T-shirt',
         'natural semicolon product description' => 'coat; blue size',
+        'natural semicolon use phrase' => 'coat; use cold water',
+        'natural semicolon show phrase' => 'gift set; show collection',
+        'natural semicolon call phrase' => 'starter set; call me maybe',
+        'natural semicolon start phrase' => 'coat; start here',
+        'natural semicolon lock phrase' => 'bag; lock style',
     ],
 ];
