@@ -12,18 +12,22 @@
 - 手動關鍵字新增／編輯保留通過安全判定的精確字串（含 `C++ <vector> 入門` 與 Windows path）；資料庫失敗、
   無效輸入與後台競態均回固定且如實的狀態，刪除、排序、啟停與設定操作不再假報成功。
 - B 模式先取得商品總數再解析最後可見頁，分類／文章與商品共用 canonical page；快取鍵加入版本
-  並只寫 resolved page，避免深分頁空結果、過大 OFFSET 與舊版 cache 污染；首次啟用時以同步
-  供裝後的最終有效結果頁為設定成功依據。
+  並只寫 resolved page，避免深分頁空結果、過大 OFFSET 與舊版 cache 污染。結果頁必須公開發布；
+  設定頁會自我修復遺失頁面，頁面 ID 寫入失敗則回滾新頁。頁面分析與 REST 共用每分鐘 30 次
+  預算，查看全部由落地頁單點記錄，不重複送出 client log。
 - 分析的 SKU／ISBN／EAN／UPC／MPN／型號／料號辨識改為 token-local byte span；只豁免完整位於
-  識別片段內的 token，NFKC compatibility 字元也納入 canonical 檢查，旁邊無關的亂數或已知
-  參數仍會被分析入口忽略。
-- 熱門建議失效加入 generation tombstone 與發布前重驗：無法安全輪替時 fail closed，新鮮計算
-  不讀寫舊 cache；只有 exact marker readback 才授權 rotation。已提交的後台變更仍回成功，但以
-  固定警示誠實標示 cache 可能延遲更新。
+  識別片段內的 token。搜尋與分析共用有界固定點 canonical closure；無 intl 時涵蓋 fullwidth、
+  Mathematical Latin（含 dotless i/j）／digits 與明列 Letterlike ASCII subset，有 intl 時另加 NFKC。閉包未完成即
+  fail closed，旁邊無關的亂數或已知參數仍會被分析入口忽略。
+- 熱門建議失效加入 generation tombstone，並以一次未經 option cache 的資料庫快照共同判定目前
+  generation 與 captured-generation marker；命中與發布前後都重驗，資料庫結果錯誤／模糊時
+  fail closed，晚到的舊 generation 寫入會移除。已提交的後台變更仍以固定警示如實標示 cache
+  可能延遲更新。
 - 分析 receipt 的訪客身分改綁簽發時間；跨 UTC 午夜但仍在有效期內的同一 receipt 維持同一
   去重身分，且線上 wire version、HMAC、期限與舊 v1 receipt 相容性不變。
-- 最近搜尋、自動熱門詞與 B 模式分析只以實際商品數為正向依據；分類／文章仍可呈現及留下
-  可辨識的零商品分析，但不再進入商品搜尋記憶。
+- 最近搜尋、自動熱門詞與 B 模式分析只以實際商品數為正向依據；filter-final 商品必須至少有
+  一筆具可見 title 與安全 URL 的可渲染項目才可授權商品總數，空白／畸形項目不會進入正向 receipt 或
+  搜尋記憶。分類／文章仍可呈現及留下可辨識的零商品分析，但不會進入商品搜尋記憶。
 
 ### Compatibility / Release Boundary
 

@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+$deepPercentPayload = '%3Cscript%3Ealert%281%29%3C%2Fscript%3E';
+for ($depth = 0; $depth < 70; ++$depth) {
+    $deepPercentPayload = str_replace('%', '%25', $deepPercentPayload);
+}
+
 return [
     'blocked' => [
         'lossy SVG event payload' => '<svg onload=alert(1)>nova</svg>',
@@ -14,11 +19,21 @@ return [
         'template statement' => '{% print(7*7) %}',
         'percent encoded HTML event' => '%3Csvg%20onload%3Dalert%281%29%3E',
         'double percent encoded HTML event' => '%253Csvg%2520onload%253Dalert%25281%2529%253E',
+        'four layer percent encoded script tag' => '%2525253Cscript%2525253Ealert(1)%2525253C%2525252Fscript%2525253E',
+        'four layer entity encoded script tag' => '&amp;amp;amp;lt;script&amp;amp;amp;gt;alert(1)&amp;amp;amp;lt;/script&amp;amp;amp;gt;',
+        'canonical closure budget exhaustion' => $deepPercentPayload,
+        'percent decoding generates invalid UTF-8' => '%C3%28',
         'path traversal' => '../../etc/passwd',
         'backslash path traversal' => '..\\..\\etc\\passwd',
         'entity encoded percent then HTML' => '&#37;3Csvg&#37;20onload&#37;3Dalert&#37;281&#37;29&#37;3E',
         'double entity encoded script tag' => '&amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;',
         'fullwidth percent then encoded script tag' => '&#xFF05;3Cscript&#xFF05;3Ealert(1)&#xFF05;3C/script&#xFF05;3E',
+        'mathematical bold JavaScript URI' => '𝐣𝐚𝐯𝐚𝐬𝐜𝐫𝐢𝐩𝐭:alert(1)',
+        'mathematical script and Letterlike JavaScript URI' => '𝒿𝒶𝓋𝒶𝓈𝒸𝓇𝒾𝓅𝓉:alert(1)',
+        'mathematical dotless i in JavaScript URI' => 'javascr𝚤pt:alert(1)',
+        'mathematical dotless j in JavaScript URI' => '𝚥avascript:alert(1)',
+        'mathematical script tag' => '<𝓈𝒸𝓇𝒾𝓅𝓉>alert(1)</𝓈𝒸𝓇𝒾𝓅𝓉>',
+        'fullwidth brackets with mathematical bold script' => '＜𝐬𝐜𝐫𝐢𝐩𝐭＞alert(1)＜/𝐬𝐜𝐫𝐢𝐩𝐭＞',
         'JavaScript URI' => 'javascript:alert(1)',
         'data HTML URI' => 'data:text/html,<svg onload=alert(1)>',
         'VBScript URI' => 'vbscript:msgbox(1)',

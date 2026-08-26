@@ -421,6 +421,65 @@ ysss_test('filter-added visible exact product group grants product authority', s
     ysss_assert_same(4, $claims['total'] ?? null);
 });
 
+ysss_test('filter-final product groups keep only renderer-visible title and url items', static function (): void {
+    $invalidCases = [
+        'empty item' => [[]],
+        'null item' => [null],
+        'missing title' => [['url' => '/product/missing-title']],
+        'missing url' => [['title' => 'Missing URL']],
+        'empty title' => [['title' => '', 'url' => '/product/empty-title']],
+        'empty url' => [['title' => 'Empty URL', 'url' => '']],
+        'blank title' => [['title' => " \t ", 'url' => '/product/blank-title']],
+        'blank url' => [['title' => 'Blank URL', 'url' => " \n "]],
+        'NBSP-only title' => [['title' => "\u{00A0}", 'url' => '/product/nbsp-title']],
+        'zero-width-only title' => [['title' => "\u{200B}", 'url' => '/product/zero-width-title']],
+        'control-only title' => [['title' => "\x00\t", 'url' => '/product/control-title']],
+        'NBSP-only url' => [['title' => 'NBSP URL', 'url' => "\u{00A0}"]],
+        'zero-width-only url' => [['title' => 'Zero-width URL', 'url' => "\u{200B}"]],
+        'unsafe url scheme' => [['title' => 'Unsafe URL', 'url' => 'javascript:alert(1)']],
+        'non-string title' => [['title' => ['Nested'], 'url' => '/product/nested-title']],
+        'non-string url' => [['title' => 'Nested URL', 'url' => ['/product/nested-url']]],
+    ];
+
+    foreach ($invalidCases as $label => $items) {
+        YSSsWpFake::reset();
+        add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
+            'type' => 'products',
+            'label' => 'Filtered products',
+            'total' => 99,
+            'items' => $items,
+        ]]);
+
+        $result = YSSsSearchService::search('Nova');
+        ysss_assert_same([], $result['groups'] ?? null, "{$label} survived into renderer groups");
+        ysss_assert_same(0, $result['total'] ?? null, "{$label} retained aggregate display authority");
+        ysss_assert_same(0, $result['products_total'] ?? null, "{$label} granted product authority");
+    }
+});
+
+ysss_test('filter-final product groups remove invalid siblings but preserve a visible product', static function (): void {
+    YSSsWpFake::reset();
+    add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
+        'type' => 'products',
+        'label' => 'Filtered products',
+        'total' => 4,
+        'items' => [
+            [],
+            null,
+            ['title' => 'Visible product', 'url' => '/product/visible'],
+            ['title' => '', 'url' => '/product/empty-title'],
+            ['title' => 'Missing URL'],
+        ],
+    ]]);
+
+    $result = YSSsSearchService::search('Nova');
+    ysss_assert_same(4, $result['total'] ?? null, 'Visible product lost its filter-final display total');
+    ysss_assert_same(4, $result['products_total'] ?? null, 'Visible product lost its filter-final group-total authority');
+    ysss_assert_same([
+        ['title' => 'Visible product', 'url' => '/product/visible'],
+    ], $result['groups'][0]['items'] ?? null, 'Invalid filter-final product siblings reached the renderer');
+});
+
 ysss_test('empty non-array and wrong-case product groups cannot grant product authority', static function (): void {
     YSSsWpFake::reset();
     add_filter('ys_ss_result_groups', static fn(array $groups): array => [
@@ -437,22 +496,29 @@ ysss_test('empty non-array and wrong-case product groups cannot grant product au
 ysss_test('multiple visible product groups sum item floors after the final filter', static function (): void {
     YSSsWpFake::reset();
     add_filter('ys_ss_result_groups', static fn(array $groups): array => [
-        ['type' => 'products', 'total' => 1, 'items' => [['title' => 'A'], ['title' => 'B'], ['title' => 'C']]],
-        ['type' => 'products', 'total' => -4, 'items' => [['title' => 'D'], ['title' => 'E']]],
+        ['type' => 'products', 'total' => 1, 'items' => [
+            ['title' => 'A', 'url' => '/product/a'],
+            ['title' => 'B', 'url' => '/product/b'],
+            ['title' => 'C', 'url' => '/product/c'],
+        ]],
+        ['type' => 'products', 'total' => -4, 'items' => [
+            ['title' => 'D', 'url' => '/product/d'],
+            ['title' => 'E', 'url' => '/product/e'],
+        ]],
         'not-a-group',
-        ['type' => 'products', 'total' => 4, 'items' => [['title' => 'F']]],
+        ['type' => 'products', 'total' => 4, 'items' => [['title' => 'F', 'url' => '/product/f']]],
         ['type' => 'categories', 'total' => 6, 'items' => [['title' => 'Category']]],
     ]);
 
     $result = YSSsSearchService::search('Nova');
     ysss_assert_same(11, $result['total'] ?? null, 'Existing aggregate total behavior changed');
-    ysss_assert_same(9, $result['products_total'] ?? null, 'Product groups did not sum max(item count, nonnegative total)');
+    ysss_assert_same(9, $result['products_total'] ?? null, 'Product groups did not sum max(valid item count, nonnegative total)');
 });
 
 ysss_test('query bounds aggregate and product totals independently', static function (): void {
     YSSsWpFake::reset();
     add_filter('ys_ss_result_groups', static fn(array $groups): array => [
-        ['type' => 'products', 'total' => 7, 'items' => [['title' => 'Product']]],
+        ['type' => 'products', 'total' => 7, 'items' => [['title' => 'Product', 'url' => '/product/product']]],
         ['type' => 'categories', 'total' => 2000000, 'items' => [['title' => 'Category']]],
     ]);
 
@@ -473,7 +539,7 @@ ysss_test('query response and receipt share the same total upper bound', static 
     add_filter('ys_ss_result_groups', static fn(array $groups): array => [[
         'type' => 'products',
         'total' => 2000000,
-        'items' => [['title' => 'Synthetic result']],
+        'items' => [['title' => 'Synthetic result', 'url' => '/product/synthetic']],
     ]]);
     $response = (new YSSsPublicController())->query(new WP_REST_Request(['q' => 'Nova']));
     ysss_assert_true($response instanceof WP_REST_Response);

@@ -5,6 +5,27 @@ use YangSheep\SmartSearch\Api\YSSsAdminController;
 use YangSheep\SmartSearch\Database\YSSsSettings;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
+// Focused page-provisioning seams live here instead of widening the shared bootstrap.
+// Production resolves these unqualified calls in the Frontend namespace first.
+if (!function_exists('YangSheep\\SmartSearch\\Frontend\\wp_insert_post')) {
+    eval(<<<'PHP'
+namespace YangSheep\SmartSearch\Frontend {
+    function wp_insert_post(array $post, bool $wpError = false): mixed {
+        $handler = $GLOBALS['ysss_results_page_insert_handler'] ?? null;
+        return is_callable($handler) ? $handler($post, $wpError) : \wp_insert_post($post, $wpError);
+    }
+
+    function wp_delete_post(int $postId, bool $forceDelete = false): mixed {
+        $handler = $GLOBALS['ysss_results_page_delete_handler'] ?? null;
+        if (is_callable($handler)) {
+            return $handler($postId, $forceDelete);
+        }
+        return function_exists('wp_delete_post') ? \wp_delete_post($postId, $forceDelete) : false;
+    }
+}
+PHP);
+}
+
 foreach ([
     'src/Security/YSSsInjectionGuard.php',
     'src/Security/YSSsSearchInput.php',
@@ -277,6 +298,134 @@ ysss_test('idempotent page-mode save with a valid page remains successful', stat
     ysss_assert_true($result instanceof WP_REST_Response);
     ysss_assert_same(732, $result->get_data()['settings']['results_page_id'] ?? null);
     ysss_assert_same(YSSsSuggestService::INVALIDATION_ROTATED, $result->get_data()['cache_status'] ?? null);
+});
+
+ysss_test('only a published shortcode page satisfies the configured results-page contract', static function (): void {
+    YSSsWpFake::reset();
+    foreach (['draft', 'pending', 'private', 'future', 'trash'] as $index => $status) {
+        $pid = 760 + $index;
+        YSSsWpFake::$posts[$pid] = new WP_Post($pid, 'page', $status, '[ys_ss_search_results]');
+        ysss_assert_false(
+            \YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id($pid),
+            "{$status} results page was accepted as public navigation authority"
+        );
+    }
+    YSSsWpFake::$posts[769] = new WP_Post(769, 'page', 'publish', '[ys_ss_search_results]');
+    ysss_assert_true(\YangSheep\SmartSearch\Frontend\YSSsResultsPage::valid_page_id(769));
+});
+
+ysss_test('unchanged page-mode save self-heals an invalid configured page during final settlement', static function (): void {
+    YSSsWpFake::reset();
+    $stored = YSSsSettings::all();
+    $stored['results_mode'] = 'page';
+    $stored['results_page_id'] = 801;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $stored;
+    $insertCalls = [];
+    $GLOBALS['ysss_results_page_insert_handler'] = static function (array $post, bool $wpError) use (&$insertCalls): int {
+        $insertCalls[] = ['post' => $post, 'wp_error' => $wpError];
+        YSSsWpFake::$posts[802] = new WP_Post(802, 'page', 'publish', (string) ($post['post_content'] ?? ''));
+        return 802;
+    };
+
+    try {
+        $result = (new YSSsAdminController())->settings_save(new WP_REST_Request(['results_mode' => 'page']));
+    } finally {
+        $GLOBALS['ysss_results_page_insert_handler'] = null;
+    }
+
+    ysss_assert_true($result instanceof WP_REST_Response);
+    ysss_assert_same(1, count($insertCalls), 'Final settlement did not run one idempotent provision attempt');
+    ysss_assert_same(true, $insertCalls[0]['wp_error'] ?? null, 'Provisioning did not request a WP_Error boundary');
+    ysss_assert_same('publish', $insertCalls[0]['post']['post_status'] ?? null);
+    ysss_assert_same(802, $result->get_data()['settings']['results_page_id'] ?? null);
+    ysss_assert_same(802, YSSsSettings::all()['results_page_id'] ?? null, 'Response did not reread authoritative storage after self-heal');
+    ysss_assert_true(isset(YSSsWpFake::$posts[802]), 'Successfully provisioned page was rolled back');
+});
+
+ysss_test('failed page-id storage rolls back every created page so retry cannot leave orphans', static function (): void {
+    YSSsWpFake::reset();
+    $stored = YSSsSettings::all();
+    $stored['results_mode'] = 'page';
+    $stored['results_page_id'] = 0;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $stored;
+
+    $insertIds = [811, 812];
+    $inserted = [];
+    $deleted = [];
+    $GLOBALS['ysss_results_page_insert_handler'] = static function (array $post, bool $wpError) use (&$insertIds, &$inserted): int {
+        $pid = (int) array_shift($insertIds);
+        $inserted[] = $pid;
+        YSSsWpFake::$posts[$pid] = new WP_Post($pid, 'page', 'publish', (string) ($post['post_content'] ?? ''));
+        return $pid;
+    };
+    $GLOBALS['ysss_results_page_delete_handler'] = static function (int $postId, bool $forceDelete) use (&$deleted): WP_Post|false {
+        $post = YSSsWpFake::$posts[$postId] ?? null;
+        $deleted[] = ['id' => $postId, 'force' => $forceDelete];
+        unset(YSSsWpFake::$posts[$postId]);
+        return $post instanceof WP_Post ? $post : false;
+    };
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
+        if (YSSsSettings::OPTION === $key && (int) ($value['results_page_id'] ?? 0) > 0) {
+            return false;
+        }
+        YSSsWpFake::$options[$key] = $value;
+        return true;
+    };
+
+    try {
+        $first = (new YSSsAdminController())->settings_save(new WP_REST_Request(['results_mode' => 'page']));
+        $second = (new YSSsAdminController())->settings_save(new WP_REST_Request(['results_mode' => 'page']));
+    } finally {
+        $GLOBALS['ysss_results_page_insert_handler'] = null;
+        $GLOBALS['ysss_results_page_delete_handler'] = null;
+    }
+
+    ysss_assert_true($first instanceof WP_Error);
+    ysss_assert_true($second instanceof WP_Error);
+    ysss_assert_same([811, 812], $inserted, 'Retry did not make exactly one fresh provision attempt');
+    ysss_assert_same([
+        ['id' => 811, 'force' => true],
+        ['id' => 812, 'force' => true],
+    ], $deleted, 'Failed page-ID storage did not force-delete each created page');
+    ysss_assert_false(isset(YSSsWpFake::$posts[811]) || isset(YSSsWpFake::$posts[812]), 'Provision failure left an orphan page');
+    ysss_assert_same(0, YSSsSettings::all()['results_page_id'] ?? null, 'Failed ID write became authoritative storage');
+});
+
+ysss_test('exceptional page-id storage failure still rolls back the created page', static function (): void {
+    YSSsWpFake::reset();
+    $stored = YSSsSettings::all();
+    $stored['results_mode'] = 'page';
+    $stored['results_page_id'] = 0;
+    YSSsWpFake::$options[YSSsSettings::OPTION] = $stored;
+    $deleted = [];
+    $GLOBALS['ysss_results_page_insert_handler'] = static function (array $post, bool $wpError): int {
+        YSSsWpFake::$posts[813] = new WP_Post(813, 'page', 'publish', (string) ($post['post_content'] ?? ''));
+        return 813;
+    };
+    $GLOBALS['ysss_results_page_delete_handler'] = static function (int $postId, bool $forceDelete) use (&$deleted): WP_Post|false {
+        $post = YSSsWpFake::$posts[$postId] ?? null;
+        $deleted[] = ['id' => $postId, 'force' => $forceDelete];
+        unset(YSSsWpFake::$posts[$postId]);
+        return $post instanceof WP_Post ? $post : false;
+    };
+    YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
+        if (YSSsSettings::OPTION === $key && (int) ($value['results_page_id'] ?? 0) > 0) {
+            throw new RuntimeException('fixture page-id storage exception');
+        }
+        YSSsWpFake::$options[$key] = $value;
+        return true;
+    };
+
+    try {
+        $result = (new YSSsAdminController())->settings_save(new WP_REST_Request(['results_mode' => 'page']));
+    } finally {
+        $GLOBALS['ysss_results_page_insert_handler'] = null;
+        $GLOBALS['ysss_results_page_delete_handler'] = null;
+    }
+
+    ysss_assert_true($result instanceof WP_Error);
+    ysss_assert_same([['id' => 813, 'force' => true]], $deleted);
+    ysss_assert_false(isset(YSSsWpFake::$posts[813]), 'Exceptional storage failure left an orphan page');
 });
 
 ysss_test('mismatching settings readback returns fixed 500 with zero invalidation', static function (): void {

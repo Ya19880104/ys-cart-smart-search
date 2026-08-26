@@ -58,6 +58,23 @@ runTests([
 		assert(1 === h.beacons.length, 'zero-product recognizable query lost its analytics path');
 		assert('receipt-category-zero-product' === (h.beaconPayload(0) || {}).receipt, 'zero-product analytics did not use its matching receipt');
 	}],
+	['page-mode view-all leaves analytics ownership to the destination page', async () => {
+		const h = createHarness({ cfg: { resultsMode: 'page' } });
+		const { input, panel } = h.forms[0];
+		input.value = 'page owned'; h.dispatch(input, 'input'); h.advanceTimers(250);
+		await h.resolveJson(0, {
+			q: 'page owned', total: 1, products_total: 1,
+			groups: [{ type: 'products', label: 'results', items: [{ title: 'Visible', url: '/product/visible' }], total: 1 }],
+			view_all: '/ys-search/?ys_ec_search=page%20owned',
+			log_receipt: 'receipt-page-owned',
+		});
+		const viewAll = panel.querySelector('.ys-ss-viewall');
+		assert(!!viewAll, 'Page-mode response did not render view-all navigation');
+		h.advanceTimers(1200);
+		assert(0 === h.beacons.length, 'Page-mode settle timer consumed analytics before destination ownership');
+		viewAll.click();
+		assert(0 === h.beacons.length, 'Page-mode view-all sent client analytics before destination page logging');
+	}],
 	['malformed product totals fail closed without aggregate fallback', async () => {
 		const cases = [
 			['missing', undefined, true],

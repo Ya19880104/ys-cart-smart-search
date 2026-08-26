@@ -39,8 +39,13 @@ final class YSSsAnalyticsAdmission {
 
 		// Inspect the complete accepted ingress, not only SearchInput's 100-character search clamp.
 		// Otherwise a human-looking prefix could hide analytics noise in the discarded tail.
+		$closure = YSSsText::canonical_candidates( $raw, $query );
+		if ( ! $closure['complete'] ) {
+			return self::REJECT_ATTACK;
+		}
+
 		$opaque_count = 0;
-		foreach ( self::analysis_candidates( $raw, $query ) as $candidate ) {
+		foreach ( $closure['candidates'] as $candidate ) {
 			if ( self::has_known_parameter_noise( $candidate ) ) {
 				return self::REJECT_KNOWN_PARAMETER;
 			}
@@ -70,43 +75,6 @@ final class YSSsAnalyticsAdmission {
 
 		preg_match_all( '/(?:^|[?&])[\p{L}][\p{L}\p{N}_-]{0,31}\s*=\s*[^&\s]{1,256}/u', $query, $matches );
 		return count( $matches[0] ?? [] ) >= 2;
-	}
-
-	/**
-	 * @return list<string>
-	 */
-	private static function analysis_candidates( string $raw, string $query ): array {
-		$candidates = array_values( array_unique( [ $raw, $query ] ) );
-		$frontier   = [ $raw ];
-
-		for ( $round = 0; $round < 3 && $frontier; $round++ ) {
-			$next = [];
-			foreach ( $frontier as $candidate ) {
-				$transforms = [
-					rawurldecode( $candidate ),
-					html_entity_decode( $candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
-					YSSsText::fold_fullwidth_ascii( $candidate ),
-				];
-				if ( class_exists( '\\Normalizer' ) ) {
-					$normalized = \Normalizer::normalize( $candidate, \Normalizer::FORM_KC );
-					if ( is_string( $normalized ) ) {
-						$transforms[] = $normalized;
-					}
-				}
-
-				foreach ( $transforms as $decoded ) {
-					if ( $decoded === $candidate || 1 !== preg_match( '//u', $decoded )
-						|| in_array( $decoded, $candidates, true ) ) {
-						continue;
-					}
-					$candidates[] = $decoded;
-					$next[]       = $decoded;
-				}
-			}
-			$frontier = $next;
-		}
-
-		return $candidates;
 	}
 
 	/**

@@ -56,7 +56,9 @@ final class YSSsSearchService {
 		 * @param array  $groups
 		 * @param string $norm
 		 */
-		$groups = (array) apply_filters( 'ys_ss_result_groups', $groups, $norm );
+		$groups = self::normalize_filter_final_product_groups(
+			(array) apply_filters( 'ys_ss_result_groups', $groups, $norm )
+		);
 		$total          = 0;
 		$products_total = 0;
 		foreach ( $groups as $group ) {
@@ -282,6 +284,58 @@ final class YSSsSearchService {
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Filter-final product groups are renderer authority, not trusted shape.
+	 * Only items with a visible title and navigable URL may remain or contribute
+	 * to product-positive receipts/recent-search memory.
+	 *
+	 * @param array<int,mixed> $groups
+	 * @return array<int,mixed>
+	 */
+	private static function normalize_filter_final_product_groups( array $groups ): array {
+		$normalized = [];
+		foreach ( $groups as $group ) {
+			if ( ! is_array( $group ) || 'products' !== ( $group['type'] ?? null ) ) {
+				$normalized[] = $group;
+				continue;
+			}
+
+			$source_items = is_array( $group['items'] ?? null ) ? $group['items'] : [];
+			$items        = [];
+			foreach ( $source_items as $item ) {
+				if ( ! is_array( $item )
+					|| ! is_string( $item['title'] ?? null )
+					|| ! self::has_visible_text( $item['title'] )
+					|| ! is_string( $item['url'] ?? null ) ) {
+					continue;
+				}
+
+				$safe_url = esc_url_raw( $item['url'], [ 'http', 'https' ] );
+				if ( ! is_string( $safe_url ) || ! self::has_visible_text( $safe_url ) ) {
+					continue;
+				}
+				if ( 1 === preg_match( '/\A([a-z][a-z0-9+.-]*):/iD', $safe_url, $scheme )
+					&& ! in_array( strtolower( $scheme[1] ), [ 'http', 'https' ], true ) ) {
+					continue;
+				}
+
+				$item['url'] = $safe_url;
+				$items[]     = $item;
+			}
+			if ( ! $items ) {
+				continue;
+			}
+
+			$group['items'] = $items;
+			$normalized[]   = $group;
+		}
+		return $normalized;
+	}
+
+	private static function has_visible_text( string $value ): bool {
+		return 1 === preg_match( '/[^\p{Z}\p{C}]/u', $value );
 	}
 
 	/**

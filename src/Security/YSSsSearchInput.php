@@ -35,7 +35,12 @@ final class YSSsSearchInput {
 			return self::blocked();
 		}
 
-		foreach ( self::canonical_candidates( $raw ) as $candidate ) {
+		$closure = YSSsText::canonical_candidates( $raw );
+		if ( ! $closure['complete'] ) {
+			return self::blocked();
+		}
+
+		foreach ( $closure['candidates'] as $candidate ) {
 			if ( YSSsInjectionGuard::is_attack( $candidate ) ) {
 				return self::blocked();
 			}
@@ -102,45 +107,6 @@ final class YSSsSearchInput {
 			}
 		}
 		return false;
-	}
-
-	/**
-	 * @return list<string>
-	 */
-	private static function canonical_candidates( string $raw ): array {
-		$candidates = [ $raw ];
-		$frontier   = [ $raw ];
-
-		// 三輪有界閉包：每輪都可 percent decode、entity decode、width fold/NFKC，
-		// 因而涵蓋 percent→entity、entity→percent、double entity 與 entity→fullwidth→percent 組合。
-		for ( $round = 0; $round < 3 && $frontier; $round++ ) {
-			$next = [];
-			foreach ( $frontier as $candidate ) {
-				$transforms = [
-					rawurldecode( $candidate ),
-					html_entity_decode( $candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
-					YSSsText::fold_fullwidth_ascii( $candidate ),
-				];
-				if ( class_exists( '\Normalizer' ) ) {
-					$normalized = \Normalizer::normalize( $candidate, \Normalizer::FORM_KC );
-					if ( is_string( $normalized ) ) {
-						$transforms[] = $normalized;
-					}
-				}
-
-				foreach ( $transforms as $transformed ) {
-					if ( $transformed === $candidate || strlen( $transformed ) > self::MAX_RAW_BYTES
-						|| in_array( $transformed, $candidates, true ) ) {
-						continue;
-					}
-					$candidates[] = $transformed;
-					$next[]       = $transformed;
-				}
-			}
-			$frontier = $next;
-		}
-
-		return $candidates;
 	}
 
 	/**

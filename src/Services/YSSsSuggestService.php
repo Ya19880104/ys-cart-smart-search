@@ -54,8 +54,8 @@ final class YSSsSuggestService {
 
 		if ( $cache_allowed ) {
 			$cached = get_transient( $cache_key );
-			// Invalidation writes the tombstone before rotating. Revalidate after the read so a
-			// cache hit that overlapped either authority write cannot escape as current data.
+			// Invalidation writes the tombstone before rotating. Revalidate after the read from
+			// one uncached DB snapshot so request-local option/notoptions cache cannot admit ABA.
 			if ( self::generation_is_current( $generation ) ) {
 				if ( is_array( $cached ) && isset( $cached['items'] ) ) {
 					return self::finalize_payload( $cached );
@@ -115,8 +115,8 @@ final class YSSsSuggestService {
 
 		if ( $cache_allowed && self::generation_is_current( $generation ) ) {
 			set_transient( $cache_key, $payload, self::CACHE_TTL );
-			// The pre-write check is the authority boundary. This post-write check is cleanup for
-			// an invalidation that began between that check and the transient write.
+			// The uncached pre-write snapshot is the publication boundary. A second uncached
+			// snapshot removes a late key if invalidation overlapped set_transient().
 			if ( ! self::generation_is_current( $generation ) ) {
 				self::delete_transient_safely( $cache_key );
 			}
@@ -246,10 +246,79 @@ final class YSSsSuggestService {
 	}
 
 	private static function generation_is_current( string $generation ): bool {
-		$state = self::generation_state();
-		return $state['cacheable']
-			&& $generation === $state['generation']
-			&& ! self::is_tombstoned( $generation );
+		if ( 1 !== preg_match( '/\A[a-z0-9_-]{1,64}\z/iD', $generation ) ) {
+			return false;
+		}
+
+		global $wpdb;
+		if ( ! is_object( $wpdb ) || ! isset( $wpdb->prefix )
+			|| ! is_string( $wpdb->prefix )
+			|| ! method_exists( $wpdb, 'prepare' )
+			|| ! method_exists( $wpdb, 'get_results' ) ) {
+			return false;
+		}
+
+		$options_table = $wpdb->prefix . 'options';
+		if ( 1 !== preg_match( '/\A[a-z0-9_]+\z/iD', $options_table ) ) {
+			return false;
+		}
+
+		$marker_name = self::tombstone_name( $generation );
+		try {
+			// Standard WordPress uses the primary wpdb connection. Replica-routing drop-ins must
+			// preserve read-after-write for this two-row statement snapshot.
+			$sql = $wpdb->prepare(
+				"SELECT option_name, option_value FROM `{$options_table}` WHERE option_name IN (%s, %s)",
+				self::GENERATION_OPTION,
+				$marker_name
+			);
+			if ( ! is_string( $sql ) || '' === $sql ) {
+				return false;
+			}
+			$rows = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		} catch ( \Throwable $error ) {
+			return false;
+		}
+
+		if ( ! is_array( $rows )
+			|| ( isset( $wpdb->last_error )
+				&& ( ! is_string( $wpdb->last_error ) || '' !== $wpdb->last_error ) ) ) {
+			return false;
+		}
+
+		$current_rows = 0;
+		$marker_rows  = 0;
+		$current      = '1';
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row )
+				|| 2 !== count( $row )
+				|| ! array_key_exists( 'option_name', $row )
+				|| ! array_key_exists( 'option_value', $row )
+				|| ! is_string( $row['option_name'] )
+				|| ! is_string( $row['option_value'] ) ) {
+				return false;
+			}
+
+			if ( self::GENERATION_OPTION === $row['option_name'] ) {
+				++$current_rows;
+				$current = $row['option_value'];
+				continue;
+			}
+
+			if ( $marker_name === $row['option_name'] ) {
+				++$marker_rows;
+				continue;
+			}
+
+			return false;
+		}
+
+		if ( $current_rows > 1 || 0 !== $marker_rows
+			|| 1 !== preg_match( '/\A[a-z0-9_-]{1,64}\z/iD', $current ) ) {
+			return false;
+		}
+
+		return $generation === $current;
 	}
 
 	private static function delete_transient_safely( string $key ): void {

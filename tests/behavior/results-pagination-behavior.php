@@ -506,9 +506,13 @@ ysss_test('malformed current-version product cache is rebuilt before real render
     ysss_assert_contains('Nova Product 1', $html, 'Malformed cache was not replaced by SQL-backed payload');
     ysss_assert_same(1, count(ysss_pagination_count_sql($db)), 'Malformed cache skipped repair COUNT');
     ysss_assert_same(1, count(ysss_pagination_row_sql($db)), 'Malformed cache skipped repair row SELECT');
-    ysss_assert_same(1, count(YSSsWpFake::$transientSets), 'Repaired canonical payload was not published exactly once');
-    ysss_assert_same($key, YSSsWpFake::$transientSets[0]['key'] ?? null);
-    ysss_assert_same('Nova Product 1', YSSsWpFake::$transientSets[0]['value']['groups'][0]['items'][0]['title'] ?? null);
+    $pageCacheWrites = array_values(array_filter(
+        YSSsWpFake::$transientSets,
+        static fn(array $write): bool => $key === ($write['key'] ?? null)
+    ));
+    ysss_assert_same(1, count($pageCacheWrites), 'Repaired canonical payload was not published exactly once');
+    ysss_assert_same($key, $pageCacheWrites[0]['key'] ?? null);
+    ysss_assert_same('Nova Product 1', $pageCacheWrites[0]['value']['groups'][0]['items'][0]['title'] ?? null);
 });
 
 ysss_test('non-scalar page ingress renders page one without warnings', static function (): void {
@@ -609,6 +613,39 @@ ysss_test('mixed page analytics use the exact product total only', static functi
     $data = $GLOBALS['wpdb']->inserts[0]['data'] ?? [];
     ysss_assert_same(5, $data['results_total'] ?? null, 'Category/post items inflated product authority');
     ysss_assert_same(1, $data['has_results'] ?? null);
+});
+
+ysss_test('distinct page-one terms share the thirty-per-minute log budget without affecting rendering', static function (): void {
+    ysss_pagination_fixture(1);
+    $terms = [
+        'nova alpha', 'nova bravo', 'nova charlie', 'nova delta', 'nova echo',
+        'nova foxtrot', 'nova golf', 'nova hotel', 'nova india', 'nova juliet',
+        'nova kilo', 'nova lima', 'nova mike', 'nova november', 'nova oscar',
+        'nova papa', 'nova quebec', 'nova romeo', 'nova sierra', 'nova tango',
+        'nova uniform', 'nova victor', 'nova whiskey', 'nova xray', 'nova yankee',
+        'nova zulu', 'nova amber', 'nova birch', 'nova cedar', 'nova dahlia',
+        'nova elm', 'nova fern', 'nova ginger', 'nova hazel', 'nova iris',
+    ];
+
+    foreach ($terms as $term) {
+        $_GET['ys_ec_search'] = $term;
+        $_GET['ys_ss_page'] = '1';
+        $html = YSSsResultsPage::render();
+        ysss_assert_contains('Nova Product 1', $html, "Rate exhaustion changed rendering for {$term}");
+    }
+
+    ysss_assert_same(30, count($GLOBALS['wpdb']->inserts), 'Page-one analytics bypassed or underfilled the shared log budget');
+    $rateWrites = array_values(array_filter(
+        YSSsWpFake::$transientSets,
+        static fn(array $write): bool => str_starts_with((string) ($write['key'] ?? ''), 'ys_ss_rl_')
+    ));
+    ysss_assert_same(30, count($rateWrites), 'Page rendering did not consume exactly the admitted log events');
+    foreach ($rateWrites as $write) {
+        ysss_assert_true(
+            str_starts_with((string) ($write['key'] ?? ''), 'ys_ss_rl_log_'),
+            'Page analytics used a private rate-limit action instead of the REST log budget'
+        );
+    }
 });
 
 ysss_test('a malicious deep request resolved to page one cannot manufacture page-one analytics', static function (): void {

@@ -54,7 +54,7 @@ final class YSSsResultsPage {
 		$post = get_post( $pid );
 		return $post instanceof \WP_Post
 			&& 'page' === $post->post_type
-			&& 'trash' !== $post->post_status
+			&& 'publish' === $post->post_status
 			&& has_shortcode( (string) $post->post_content, self::SHORTCODE );
 	}
 
@@ -88,7 +88,23 @@ final class YSSsResultsPage {
 			return 0;
 		}
 
-		YSSsSettings::update( [ 'results_page_id' => (int) $new ] );
+		$stored_ok = false;
+		try {
+			YSSsSettings::update( [ 'results_page_id' => (int) $new ] );
+			$stored    = YSSsSettings::all();
+			$stored_ok = (int) ( $stored['results_page_id'] ?? 0 ) === (int) $new
+				&& self::valid_page_id( (int) $new );
+		} catch ( \Throwable $error ) {
+			$stored_ok = false;
+		}
+		if ( ! $stored_ok ) {
+			try {
+				wp_delete_post( (int) $new, true );
+			} catch ( \Throwable $error ) {
+				// Best-effort rollback: the settings contract still fails closed below.
+			}
+			return 0;
+		}
 		return (int) $new;
 	}
 
@@ -167,9 +183,11 @@ final class YSSsResultsPage {
 
 		// 分析記錄（去重）：僅第一頁；有/無結果都記（零結果＝商機）。
 		if ( $analytics_page_one ) {
-			$total_for_log = (int) $res['products_total'];
 			try {
-				YSSsQueryRepository::log_page( $query, $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
+				if ( YSSsRateLimiter::allow( 'log', 30 ) ) {
+					$total_for_log = (int) $res['products_total'];
+					YSSsQueryRepository::log_page( $query, $total_for_log, implode( ',', $res['content_types'] ), YSSsRateLimiter::visitor_hash() );
+				}
 			} catch ( \Throwable $e ) {
 				// 分析旁路：寫入失敗不影響頁面。
 			}

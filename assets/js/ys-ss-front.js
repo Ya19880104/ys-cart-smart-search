@@ -272,7 +272,9 @@
 			});
 			var viewAll = el('a', 'ys-ss-viewall', CFG.i18n.viewAll);
 			viewAll.href = data.view_all || CFG.shopUrl;
-			viewAll.addEventListener('click', function () { logQuery(logTerm, receipt, sourceOf(form)); });
+			if (CFG.resultsMode !== 'page') {
+				viewAll.addEventListener('click', function () { logQuery(logTerm, receipt, sourceOf(form)); });
+			}
 			panel.appendChild(viewAll);
 			visible = true;
 		}
@@ -396,7 +398,7 @@
 				}
 
 				clearTimeout(state.settleTimer);
-				if (query.length >= 2 && state.proof) {
+				if (CFG.resultsMode !== 'page' && query.length >= 2 && state.proof) {
 					var proof = state.proof;
 					var settleMode = state.mode;
 					state.settleTimer = setTimeout(function () {

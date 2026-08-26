@@ -247,6 +247,11 @@ final class YSSsAdminController {
 		}
 		$expected = YSSsSettings::update( $patch );
 		$settings = YSSsSettings::all();
+		if ( 'page' === ( $settings['results_mode'] ?? '' )
+			&& ! YSSsResultsPage::valid_page_id( (int) ( $settings['results_page_id'] ?? 0 ) ) ) {
+			YSSsResultsPage::ensure_page();
+			$settings = YSSsSettings::all();
+		}
 
 		// update_option hooks run synchronously. Switching to page mode may therefore provision
 		// the results page through a nested settings write before update() returns. Accept only

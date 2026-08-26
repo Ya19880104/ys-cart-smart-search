@@ -19,8 +19,72 @@ foreach ([
     ysss_require_source($source);
 }
 
+/**
+ * Install an options-table authority fixture without changing the shared bootstrap fake.
+ * Repository SELECTs still receive an empty result; only the two-name cache-authority
+ * SELECT is intercepted here.
+ *
+ * @param callable(string,mixed,YSSsFakeWpdb):array<int,mixed> $resolver
+ */
+function ysss_suggest_set_authority_rows(callable $resolver): void
+{
+    $GLOBALS['wpdb']->getResultsHandler = static function (
+        string $query,
+        mixed $output,
+        YSSsFakeWpdb $database
+    ) use ($resolver): array {
+        if (!str_contains($query, 'ys_ss_suggest_cache_generation')
+            || !str_contains($query, 'ys_ss_suggest_tombstone_')
+            || 1 !== preg_match('/\bFROM\s+`?' . preg_quote($database->prefix, '/') . 'options`?/i', $query)) {
+            return [];
+        }
+
+        $GLOBALS['ysss_suggest_authority_queries'][] = $query;
+        return $resolver($query, $output, $database);
+    };
+}
+
+/** Reset the focused fixture and expose the in-memory options as uncached DB rows. */
+function ysss_suggest_reset(): void
+{
+    \YSSsWpFake::reset();
+    $GLOBALS['ysss_suggest_authority_queries'] = [];
+    ysss_suggest_set_authority_rows(static function (string $query): array {
+        preg_match_all(
+            "/'(ys_ss_(?:suggest_cache_generation|suggest_tombstone_[a-f0-9]{64}))'/i",
+            $query,
+            $matches
+        );
+
+        $rows = [];
+        foreach (array_unique($matches[1] ?? []) as $name) {
+            if (array_key_exists($name, YSSsWpFake::$options)) {
+                $rows[] = [
+                    'option_name' => $name,
+                    'option_value' => YSSsWpFake::$options[$name],
+                ];
+            }
+        }
+        return $rows;
+    });
+}
+
+/** Keep Options API reads request-locally stale while the DB fixture can move ahead. */
+function ysss_suggest_stale_option_cache(string $generation): void
+{
+    YSSsWpFake::$getOptionHandler = static function (string $key, mixed $default) use ($generation): mixed {
+        if ('ys_ss_suggest_cache_generation' === $key) {
+            return $generation;
+        }
+        if (str_starts_with($key, 'ys_ss_suggest_tombstone_')) {
+            return false; // Simulate request-local `notoptions` for every marker.
+        }
+        return YSSsWpFake::$options[$key] ?? $default;
+    };
+}
+
 ysss_test('cached suggestions pass through the final raw-input filter', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $unsafe = [
         'count' => 2,
         'recent_enabled' => true,
@@ -42,7 +106,7 @@ ysss_test('cached suggestions pass through the final raw-input filter', static f
 });
 
 ysss_test('external suggestion filter cannot reintroduce blocked output', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $GLOBALS['wpdb']->columnSets = [[], []];
     add_filter('ys_ss_suggestions', static fn(array $items): array => [
         ['term' => '<svg onload=alert(1)>nova</svg>', 'source' => 'external'],
@@ -55,7 +119,7 @@ ysss_test('external suggestion filter cannot reintroduce blocked output', static
 });
 
 ysss_test('suggest count zero stays disabled for cached candidates', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_settings']['suggest_count'] = 0;
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
         'count' => 0,
@@ -68,7 +132,7 @@ ysss_test('suggest count zero stays disabled for cached candidates', static func
 });
 
 ysss_test('suggest count zero stays disabled after the external filter', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_settings']['suggest_count'] = 0;
     add_filter('ys_ss_suggestions', static fn(array $items): array => [
         ['term' => 'nova', 'source' => 'external'],
@@ -79,7 +143,7 @@ ysss_test('suggest count zero stays disabled after the external filter', static 
 });
 
 ysss_test('public suggest tolerates a non-scalar external source', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $GLOBALS['wpdb']->columnSets = [[], []];
     add_filter('ys_ss_suggestions', static fn(array $items): array => [
         ['term' => 'nova', 'source' => new stdClass()],
@@ -92,8 +156,97 @@ ysss_test('public suggest tolerates a non-scalar external source', static functi
     ], $payload['items'] ?? null);
 });
 
+ysss_test('uncached cache authority closes stale generation and notoptions ABA across all four states', static function (): void {
+    $captured = 'matrix-g';
+    $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $captured);
+    $cases = [
+        'G marker absent' => ['current' => $captured, 'marker' => false, 'accept' => true],
+        'G marker present despite cached notoptions miss' => ['current' => $captured, 'marker' => true, 'accept' => false],
+        'N marker present while generation cache stays G' => ['current' => 'matrix-n', 'marker' => true, 'accept' => false],
+        'N marker absent after cleanup while generation cache stays G' => ['current' => 'matrix-n', 'marker' => false, 'accept' => false],
+    ];
+
+    foreach ($cases as $label => $case) {
+        ysss_suggest_reset();
+        YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $captured;
+        ysss_suggest_stale_option_cache($captured);
+        YSSsWpFake::$transients['ys_ss_suggest_cache_v' . $captured] = [
+            'count' => 1,
+            'recent_enabled' => true,
+            'items' => [['term' => 'cached-' . $label, 'source' => 'manual']],
+        ];
+        $rows = [[
+            'option_name' => 'ys_ss_suggest_cache_generation',
+            'option_value' => $case['current'],
+        ]];
+        if ($case['marker']) {
+            // Presence is invalidating authority even if the stored value is unexpected.
+            $rows[] = ['option_name' => $marker, 'option_value' => 'mismatched-marker-value'];
+        }
+        ysss_suggest_set_authority_rows(static fn(): array => $rows);
+        $GLOBALS['wpdb']->columnSets = [[], []];
+        add_filter('ys_ss_suggestions', static fn(array $items): array => [
+            ['term' => 'fresh-' . $label, 'source' => 'external'],
+        ]);
+
+        $payload = YSSsSuggestService::suggestions();
+        $expectedTerm = $case['accept'] ? 'cached-' . $label : 'fresh-' . $label;
+        ysss_assert_same($expectedTerm, $payload['items'][0]['term'] ?? null, $label);
+        ysss_assert_same([], YSSsWpFake::$transientSets, $label . ' unexpectedly published a cache entry');
+        ysss_assert_same(1, count($GLOBALS['ysss_suggest_authority_queries']), $label . ' did not use one authority snapshot');
+        $query = $GLOBALS['ysss_suggest_authority_queries'][0] ?? '';
+        ysss_assert_true(str_contains($query, 'ys_ss_suggest_cache_generation') && str_contains($query, $marker), $label . ' did not read both rows together');
+        ysss_assert_same(1, preg_match_all('/\bSELECT\b/i', $query), $label . ' authority was not a single SELECT');
+    }
+});
+
+ysss_test('authority SQL errors malformed rows and duplicates fail closed without cache publication', static function (): void {
+    $generation = 'authority-failure-g';
+    $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
+    $generationRow = [
+        'option_name' => 'ys_ss_suggest_cache_generation',
+        'option_value' => $generation,
+    ];
+    $scenarios = [
+        'database error' => static function (string $query, mixed $output, YSSsFakeWpdb $database) use ($generationRow): array {
+            $database->last_error = 'simulated authority read error';
+            return [$generationRow];
+        },
+        'adapter exception' => static function (): array {
+            throw new RuntimeException('simulated authority adapter failure');
+        },
+        'malformed generation' => static fn(): array => [[
+            'option_name' => 'ys_ss_suggest_cache_generation',
+            'option_value' => 'bad token!',
+        ]],
+        'malformed row' => static fn(): array => [['option_name' => 'ys_ss_suggest_cache_generation']],
+        'duplicate generation' => static fn(): array => [$generationRow, $generationRow],
+        'duplicate marker' => static fn(): array => [
+            $generationRow,
+            ['option_name' => $marker, 'option_value' => $generation],
+            ['option_name' => $marker, 'option_value' => $generation],
+        ],
+    ];
+
+    foreach ($scenarios as $label => $resolver) {
+        ysss_suggest_reset();
+        YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
+        ysss_suggest_stale_option_cache($generation);
+        ysss_suggest_set_authority_rows($resolver);
+        $GLOBALS['wpdb']->columnSets = [[], []];
+        add_filter('ys_ss_suggestions', static fn(array $items): array => [
+            ['term' => 'fresh-' . $label, 'source' => 'external'],
+        ]);
+
+        $payload = YSSsSuggestService::suggestions();
+        ysss_assert_same('fresh-' . $label, $payload['items'][0]['term'] ?? null, $label . ' did not return fresh data');
+        ysss_assert_same([], YSSsWpFake::$transientSets, $label . ' published without unambiguous DB authority');
+        ysss_assert_same(1, count($GLOBALS['ysss_suggest_authority_queries']), $label . ' did not fail at its first authority snapshot');
+    }
+});
+
 ysss_test('in-process invalidation prevents a late writer from publishing its captured generation', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old7';
     $GLOBALS['wpdb']->columnSets = [[], []];
     $invalidations = 0;
@@ -124,7 +277,7 @@ ysss_test('in-process invalidation prevents a late writer from publishing its ca
 });
 
 ysss_test('invalidate persists an autoload-disabled tombstone before generation rotation', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old-marker';
     YSSsWpFake::$transients['ys_ss_suggest_cache_vold-marker'] = ['items' => [['term' => 'old']]];
     YSSsWpFake::$transients['ys_ss_suggest_cache'] = ['items' => [['term' => 'legacy']]];
@@ -157,7 +310,7 @@ ysss_test('invalidate persists an autoload-disabled tombstone before generation 
 });
 
 ysss_test('durable marker makes a failed generation write bypass fresh and deletes old caches', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old8';
     YSSsWpFake::$transients['ys_ss_suggest_cache_vold8'] = ['items' => [['term' => 'stale']]];
     YSSsWpFake::$transients['ys_ss_suggest_cache'] = ['items' => [['term' => 'legacy']]];
@@ -172,7 +325,7 @@ ysss_test('durable marker makes a failed generation write bypass fresh and delet
 });
 
 ysss_test('durable final marker overrides an earlier generation update exception', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'throwing-update';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -188,7 +341,7 @@ ysss_test('durable final marker overrides an earlier generation update exception
 });
 
 ysss_test('durable final marker overrides an earlier add exception after persistence', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'throwing-add';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -206,7 +359,7 @@ ysss_test('durable final marker overrides an earlier add exception after persist
 });
 
 ysss_test('false marker add with strict readback mismatch never attempts generation rotation', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'false-marker';
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
     YSSsWpFake::$addOptionHandler = static fn(string $key, mixed $value, string $deprecated, mixed $autoload): bool => false;
@@ -222,7 +375,7 @@ ysss_test('false marker add with strict readback mismatch never attempts generat
 });
 
 ysss_test('false marker add may rotate only when an identical marker already exists', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'existing-marker';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -238,7 +391,7 @@ ysss_test('false marker add may rotate only when an identical marker already exi
 });
 
 ysss_test('failed marker authority cannot promote an interleaved stale payload into the current generation', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'interleave-old';
     $candidate = str_repeat('ab', 16);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -271,7 +424,7 @@ ysss_test('failed marker authority cannot promote an interleaved stale payload i
 });
 
 ysss_test('total authority persistence failure returns failed while still deleting old caches', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old9';
     YSSsWpFake::$transients['ys_ss_suggest_cache_vold9'] = ['items' => [['term' => 'stale']]];
     YSSsWpFake::$transients['ys_ss_suggest_cache'] = ['items' => [['term' => 'legacy']]];
@@ -283,7 +436,7 @@ ysss_test('total authority persistence failure returns failed while still deleti
 });
 
 ysss_test('a concurrent generation change is rotated even when this update reports false', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'old10';
     YSSsWpFake::$updateOptionHandler = static function (string $key, mixed $value, mixed $autoload): bool {
         YSSsWpFake::$options[$key] = 'concurrent-token';
@@ -295,7 +448,7 @@ ysss_test('a concurrent generation change is rotated even when this update repor
 });
 
 ysss_test('tombstoned reader heals once without reading the stale key and resumes new cache', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $old = 'reader-old';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $old);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $old;
@@ -323,7 +476,7 @@ ysss_test('tombstoned reader heals once without reading the stale key and resume
 });
 
 ysss_test('tombstoned reader with failed healing computes fresh without transient read or write', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $old = 'reader-stuck';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $old);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $old;
@@ -344,7 +497,7 @@ ysss_test('tombstoned reader with failed healing computes fresh without transien
 });
 
 ysss_test('builder that observes a new tombstone returns fresh but never publishes', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'builder-old';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -360,7 +513,7 @@ ysss_test('builder that observes a new tombstone returns fresh but never publish
 });
 
 ysss_test('successful rotation removes the old marker but never a marker for the new generation', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $old = 'cleanup-old';
     $oldMarker = 'ys_ss_suggest_tombstone_' . hash('sha256', $old);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $old;
@@ -379,7 +532,7 @@ ysss_test('successful rotation removes the old marker but never a marker for the
 });
 
 ysss_test('random token failure is contained and resolves from durable marker state', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'random-old';
     YSSsWpFake::$randomBytesHandler = static function (int $length): string {
         throw new RuntimeException('SECRET random provider');
@@ -391,7 +544,7 @@ ysss_test('random token failure is contained and resolves from durable marker st
 });
 
 ysss_test('cached hit is discarded when its generation becomes tombstoned during transient read', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'read-race';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -416,7 +569,7 @@ ysss_test('cached hit is discarded when its generation becomes tombstoned during
 });
 
 ysss_test('cached hit is discarded when generation changes during transient read', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'read-old';
     YSSsWpFake::$getTransientHandler = static function (string $key): mixed {
         if ('ys_ss_suggest_cache_vread-old' === $key) {
@@ -438,7 +591,7 @@ ysss_test('cached hit is discarded when generation changes during transient read
 });
 
 ysss_test('heal refuses a newly tombstoned generation without reading or writing its cache', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $old = 'heal-old';
     $oldMarker = 'ys_ss_suggest_tombstone_' . hash('sha256', $old);
     $new = 'heal-new';
@@ -467,7 +620,7 @@ ysss_test('heal refuses a newly tombstoned generation without reading or writing
 });
 
 ysss_test('malformed stored generation is non-cacheable and never falls back to historical v1', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'bad token!';
     YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
         'count' => 1,
@@ -485,7 +638,7 @@ ysss_test('malformed stored generation is non-cacheable and never falls back to 
 
 ysss_test('non-string scalar generation aliases never activate historical v1 cache', static function (): void {
     foreach ([1, true] as $malformed) {
-        YSSsWpFake::reset();
+        ysss_suggest_reset();
         YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $malformed;
         YSSsWpFake::$transients['ys_ss_suggest_cache_v1'] = [
             'count' => 1,
@@ -503,7 +656,7 @@ ysss_test('non-string scalar generation aliases never activate historical v1 cac
 });
 
 ysss_test('update true with unchanged generation resolves from final readback as bypass', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'lying-write';
     YSSsWpFake::$updateOptionHandler = static fn(string $key, mixed $value, mixed $autoload): bool => true;
 
@@ -511,7 +664,7 @@ ysss_test('update true with unchanged generation resolves from final readback as
 });
 
 ysss_test('marker durability is decided by the final strict readback', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $generation = 'vanishing-marker';
     $marker = 'ys_ss_suggest_tombstone_' . hash('sha256', $generation);
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = $generation;
@@ -530,7 +683,7 @@ ysss_test('marker durability is decided by the final strict readback', static fu
 });
 
 ysss_test('fresh writer cleans up its just-written key when authority changes during set', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'post-write-old';
     $GLOBALS['wpdb']->columnSets = [[], []];
     add_filter('ys_ss_suggestions', static fn(array $items): array => [['term' => 'fresh-returned', 'source' => 'external']]);
@@ -543,12 +696,13 @@ ysss_test('fresh writer cleans up its just-written key when authority changes du
     $payload = YSSsSuggestService::suggestions();
     ysss_assert_same([['term' => 'fresh-returned', 'source' => 'external']], $payload['items'] ?? null);
     ysss_assert_same(1, count(YSSsWpFake::$transientSets));
+    ysss_assert_same(3, count($GLOBALS['ysss_suggest_authority_queries']), 'Writer did not check authority after transient read and on both sides of publication');
     ysss_assert_false(isset(YSSsWpFake::$transients['ys_ss_suggest_cache_vpost-write-old']), 'Race-losing transient survived post-write cleanup');
     ysss_assert_true(in_array('ys_ss_suggest_cache_vpost-write-old', array_column(YSSsWpFake::$transientDeletes, 'key'), true));
 });
 
 ysss_test('overlapping invalidations never reuse an already issued generation', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     YSSsWpFake::$options['ys_ss_suggest_cache_generation'] = 'seed';
     $writes = [];
     $nested = false;
@@ -576,7 +730,7 @@ ysss_test('overlapping invalidations never reuse an already issued generation', 
 });
 
 ysss_test('auto terms overfetch before filtering and then backfill accepted rows', static function (): void {
-    YSSsWpFake::reset();
+    ysss_suggest_reset();
     $GLOBALS['wpdb']->respectColumnLimit = true;
     $GLOBALS['wpdb']->columnSets = [[
         '{{7*7}}',
