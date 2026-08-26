@@ -936,4 +936,20 @@ if (!function_exists('get_the_post_thumbnail_url')) {
     }
 }
 
+// Install the entropy seam before any behavior file can invoke SuggestService.
+// Defining this lazily inside suggestion-cache-behavior.php is order-dependent:
+// PHP may already have cached the global random_bytes() fallback at the call site.
+if (!function_exists('YangSheep\\SmartSearch\\Services\\random_bytes')) {
+    eval(<<<'PHP'
+namespace YangSheep\SmartSearch\Services {
+    function random_bytes(int $length): string {
+        if (null !== \YSSsWpFake::$randomBytesHandler) {
+            return (\YSSsWpFake::$randomBytesHandler)($length);
+        }
+        return \random_bytes($length);
+    }
+}
+PHP);
+}
+
 YSSsWpFake::reset();

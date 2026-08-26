@@ -5,19 +5,6 @@ use YangSheep\SmartSearch\Database\YSSsQueryRepository;
 use YangSheep\SmartSearch\Api\YSSsPublicController;
 use YangSheep\SmartSearch\Services\YSSsSuggestService;
 
-if (!function_exists('YangSheep\\SmartSearch\\Services\\random_bytes')) {
-    eval(<<<'PHP'
-namespace YangSheep\SmartSearch\Services {
-    function random_bytes(int $length): string {
-        if (null !== \YSSsWpFake::$randomBytesHandler) {
-            return (\YSSsWpFake::$randomBytesHandler)($length);
-        }
-        return \random_bytes($length);
-    }
-}
-PHP);
-}
-
 foreach ([
     'src/Security/YSSsInjectionGuard.php',
     'src/Security/YSSsSearchInput.php',
