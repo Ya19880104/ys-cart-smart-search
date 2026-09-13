@@ -314,13 +314,13 @@ $check('C27 v1.5.1+ results-page raw-first guard + version >= 1.5.1 + CHANGELOG'
     && version_compare($vh[1] ?? '0', '1.5.1', '>=')
     && str_contains($log, '## [1.5.1]'));
 
-// C28 v1.5.4 候選 metadata：外掛 header、常數與首個 CHANGELOG 版本須精確一致。
+// C28 v1.5.5 候選 metadata：外掛 header、常數與首個 CHANGELOG 版本須精確一致。
 preg_match('/^## \[([0-9]+\.[0-9]+\.[0-9]+)\]/m', $log, $vl);
-$check('C28 v1.5.4 exact metadata parity + release floor',
+$check('C28 v1.5.5 exact metadata parity + release floor',
     '' !== ($vh[1] ?? '')
     && ($vh[1] ?? '') === ($vc[1] ?? '')
     && ($vh[1] ?? '') === ($vl[1] ?? '')
-    && version_compare($vh[1] ?? '0', '1.5.4', '>='));
+    && version_compare($vh[1] ?? '0', '1.5.5', '>='));
 
 // C29 fix-5：完整 ingress receipt／分析分流、recent v2，以及 REST/B 唯一 query 預算。
 $check('C29 v1.5.3 fix-5 full-ingress analytics + shared public query authority',

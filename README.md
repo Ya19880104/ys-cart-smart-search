@@ -12,7 +12,7 @@ YS CART 站內智慧搜尋 add-on（對標 Searchanise）：即搜即得、混�
 
 ## 需求
 
-- WordPress 6.0+／PHP 8.1+
+- WordPress 6.0+／PHP 8.2+
 - **YS CART** 外掛（本外掛依附核心：選單、設計系統、REST namespace、每日排程皆掛核心）
 
 ## 隱私
