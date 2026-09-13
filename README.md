@@ -2,6 +2,8 @@
 
 YS CART 站內智慧搜尋 add-on（對標 Searchanise）：即搜即得、混合式熱門關鍵字、完整搜尋分析。
 
+目前版本：**1.5.6**；內嵌的 YS Plugin Hub Client 為 **2.0.7**。
+
 ## 功能
 
 - **搜尋 Bar 與 Icon 彈窗**：`[ys_ss_search]`（行內搜尋框）、`[ys_ss_search_icon]`（圖示 → 全屏彈窗）；可選「接管核心搜尋短代碼」一鍵升級既有版位。

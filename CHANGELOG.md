@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.5.6] - 2026-09-13
+
+- 同步正式審核的完整 YS Plugin Hub Client 2.0.7 runtime：管理面傳輸改用 REST、移除舊 Ajax controller，並保留既有更新與工具箱整合。
+- Smart Search 搜尋、分析、REST、資料表 schema 與外層載入／註冊參數不變；最低 PHP 仍為 8.2。
+
 ## [1.5.5] - 2026-09-13
 
 - 同步受審的完整 YS Plugin Hub Client 2.0.6 runtime，加入共用工具箱選單正規化並保留既有更新防護。
