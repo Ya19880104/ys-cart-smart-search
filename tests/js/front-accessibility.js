@@ -263,6 +263,89 @@ runTests([
 		assert(false === panel.hidden, 'T9 middle-button mousedown hid the panel');
 		assert(h.document.activeElement === input, 'T9 middle-button mousedown left the search input');
 	}],
+	['late in-flight and debounced queries stay collapsed after Tab leaves the form', async () => {
+		const failures = [];
+		function check(condition, message) {
+			if (!condition) { failures.push(message); }
+		}
+		const outsideA = (() => {
+			const h = createHarness();
+			const { input, panel, form } = h.forms[0];
+			const outside = h.document.createElement('button');
+			outside.type = 'button';
+			h.document.body.appendChild(outside);
+			input.value = 'nova';
+			input.focus();
+			check(1 === h.pendingFetches.length, 'scenario A did not start the in-flight query');
+			h.dispatch(input, 'focusout', { relatedTarget: outside });
+			check(panel.hidden, 'scenario A Tab did not hide the panel before the response');
+			return { h, input, panel, form };
+		})();
+		await outsideA.h.resolveJson(0, threeResults());
+		check(outsideA.panel.hidden, 'scenario A late response reopened the panel');
+		check('false' === outsideA.input.getAttribute('aria-expanded'), 'scenario A late response set aria-expanded');
+		check(outsideA.form._ysSsLogProof && 'receipt-nova' === outsideA.form._ysSsLogProof.receipt, 'scenario A late response dropped the search proof');
+
+		const outsideB = (() => {
+			const h = createHarness();
+			const { input, panel, form } = h.forms[0];
+			const outside = h.document.createElement('button');
+			outside.type = 'button';
+			h.document.body.appendChild(outside);
+			input.value = 'nova';
+			h.dispatch(input, 'input');
+			check(0 === h.pendingFetches.length, 'scenario B sent the query before debounce');
+			h.dispatch(input, 'focusout', { relatedTarget: outside });
+			check(panel.hidden, 'scenario B Tab did not hide the panel before debounce');
+			h.advanceTimers(250);
+			check(1 === h.pendingFetches.length, 'scenario B debounce did not start the query');
+			check(panel.hidden, 'scenario B debounced query reopened the panel');
+			check('false' === input.getAttribute('aria-expanded'), 'scenario B debounced query set aria-expanded');
+			return { h, input, panel, form };
+		})();
+		await outsideB.h.resolveJson(0, threeResults());
+		check(outsideB.panel.hidden, 'scenario B late response reopened the panel');
+		check('false' === outsideB.input.getAttribute('aria-expanded'), 'scenario B late response set aria-expanded');
+		check(outsideB.form._ysSsLogProof && 'receipt-nova' === outsideB.form._ysSsLogProof.receipt, 'scenario B late response dropped the search proof');
+		if (failures.length) { throw new Error(failures.join('; ')); }
+	}],
+	['S1 held panel mousedown still collapses when Tab moves outside the form', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		const outside = h.document.createElement('button');
+		outside.type = 'button';
+		h.document.body.appendChild(outside);
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		h.dispatch(panel, 'mousedown', { button: 0 });
+		h.dispatch(input, 'focusout', { relatedTarget: outside });
+		assert(panel.hidden, 'S1 Tab to an outside control left the panel open');
+		assert('false' === input.getAttribute('aria-expanded'), 'S1 Tab to an outside control left aria-expanded true');
+	}],
+	['S7 panel background mousedown is not cancelled', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		const down = h.dispatch(panel, 'mousedown', { button: 0 });
+		assert(false === down.defaultPrevented, 'S7 background mousedown was cancelled');
+		assert(false === panel.hidden, 'S7 background mousedown hid the panel');
+	}],
+	['S4 middle-button mousedown keeps the panel open through a null focusout', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		const option = panel.querySelector('.ys-ss-item');
+		assert(option, 'S4 result option is missing');
+		h.dispatch(option, 'mousedown', { button: 1 });
+		h.dispatch(input, 'focusout', { relatedTarget: null });
+		assert(false === panel.hidden, 'S4 null focusout hid the panel while the middle button was down');
+		assert('true' === input.getAttribute('aria-expanded'), 'S4 null focusout cleared aria-expanded while the middle button was down');
+	}],
 	['Escape clears active descendant and collapses the combobox', async () => {
 		const h = createHarness();
 		const { input, panel } = h.forms[0];
