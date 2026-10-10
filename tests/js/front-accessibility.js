@@ -55,6 +55,29 @@ runTests([
 		h.dispatch(input, 'keydown', { key: 'Enter' });
 		assert(0 === options[0].clickCount && 1 === options[1].clickCount && 0 === options[2].clickCount, 'Enter did not activate only the current option');
 	}],
+	['T0 focusout with a null target collapses the panel and still submits proof', async () => {
+		const h = createHarness();
+		const { form, input, panel } = h.forms[0];
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, {
+			q: 'nova', total: 3, products_total: 3, log_receipt: 'receipt-nova', recent_term: 'nova', view_all: '/shop/?q=nova',
+			groups: threeResults().groups,
+		});
+		assert(h.hasTimer(1200), 'T0 fixture did not schedule the settle timer');
+		assert(form._ysSsLogProof && 'receipt-nova' === form._ysSsLogProof.receipt, 'T0 fixture did not keep a signed proof');
+		h.dispatch(input, 'focusout', { relatedTarget: null });
+		assert(panel.hidden, 'T0 null focusout did not hide the panel');
+		assert('false' === input.getAttribute('aria-expanded'), 'T0 null focusout did not set aria-expanded=false');
+		assert(null === input.getAttribute('aria-activedescendant'), 'T0 null focusout kept aria-activedescendant');
+		assert(form._ysSsLogProof && 'receipt-nova' === form._ysSsLogProof.receipt, 'T0 focusout cleared the search proof');
+		assert(h.hasTimer(1200), 'T0 focusout cleared the settle timer');
+		h.dispatch(form, 'submit');
+		const recent = JSON.parse(h.sandbox.localStorage.getItem('ysss_recent_v2') || '[]');
+		assert(1 === h.beacons.length && 'receipt-nova' === (h.beaconPayload(0) || {}).receipt, 'T0 submit did not send the signed beacon');
+		assert(1 === recent.length && 'nova' === recent[0], 'T0 submit did not write the recent search');
+		assert('receipt-nova' === (form.querySelector('input[name="ys_ss_log_receipt"]') || {}).value, 'T0 submit did not carry ys_ss_log_receipt');
+	}],
 	['T1 focus leaving the form collapses the open suggestion panel', async () => {
 		const h = createHarness();
 		const { input, panel } = h.forms[0];
@@ -114,6 +137,131 @@ runTests([
 		assert(h.document.activeElement === input, 'T3 focus left the search input');
 		assert(false === panel.hidden, 'T3 panel was closed when the option activated');
 		assert('true' === input.getAttribute('aria-expanded'), 'T3 collapsed aria-expanded before activation');
+	}],
+	['T4 focusout from an option collapses the panel when Tab leaves the form', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		const outside = h.document.createElement('button');
+		outside.type = 'button';
+		h.document.body.appendChild(outside);
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		const option = panel.querySelector('.ys-ss-item');
+		assert(option, 'T4 result option is missing');
+		option.focus();
+		assert(h.document.activeElement === option, 'T4 option did not take focus');
+		h.dispatch(option, 'focusout', { relatedTarget: outside });
+		assert(panel.hidden, 'T4 focusout from an option did not hide the panel');
+		assert('false' === input.getAttribute('aria-expanded'), 'T4 focusout from an option did not set aria-expanded=false');
+		assert(null === input.getAttribute('aria-activedescendant'), 'T4 focusout from an option kept aria-activedescendant');
+	}],
+	['T5 chip and view-all mousedown activate without leaving the input', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		function pointerActivate(node, label) {
+			const down = h.dispatch(node, 'mousedown', { button: 0 });
+			if (!down.defaultPrevented) {
+				h.dispatch(input, 'focusout', { relatedTarget: node });
+				node.focus();
+			}
+			assert(true === down.defaultPrevented, label + ' mousedown was not cancelled');
+			assert(false === panel.hidden, label + ' panel collapsed before activation');
+			assert(h.document.activeElement === input, label + ' focus left the search input');
+			node.click();
+			assert(node.clickCount >= 1, label + ' click was not activated');
+			assert(h.document.activeElement === input, label + ' focus left after activation');
+			assert(false === panel.hidden, label + ' panel closed on activation');
+		}
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		const viewAll = panel.querySelector('.ys-ss-viewall');
+		assert(viewAll, 'T5 view-all is missing');
+		pointerActivate(viewAll, 'T5 view-all');
+		const away = h.document.createElement('button');
+		away.type = 'button';
+		h.document.body.appendChild(away);
+		away.focus();
+		input.value = '';
+		input.focus();
+		await h.resolveJson(1, { items: [{ term: 'wool' }] });
+		const chip = panel.querySelector('.ys-ss-chip');
+		assert(chip, 'T5 chip is missing');
+		pointerActivate(chip, 'T5 chip');
+	}],
+	['T6 mousedown on the search input is not cancelled', async () => {
+		const h = createHarness();
+		const { input } = h.forms[0];
+		const outside = h.document.createElement('button');
+		outside.type = 'button';
+		h.document.body.appendChild(outside);
+		outside.focus();
+		const down = h.dispatch(input, 'mousedown', { button: 0 });
+		assert(false === down.defaultPrevented, 'T6 input mousedown was cancelled');
+		if (!down.defaultPrevented) { input.focus(); }
+		assert(h.document.activeElement === input, 'T6 input did not take focus');
+	}],
+	['T7 panel background pointer does not collapse until the pointer flag clears', async () => {
+		async function openPanel() {
+			const h = createHarness();
+			const { input, panel } = h.forms[0];
+			input.value = 'nova';
+			input.focus();
+			await h.resolveJson(0, threeResults());
+			h.dispatch(input, 'keydown', { key: 'ArrowDown' });
+			assert(false === panel.hidden, 'T7 fixture panel did not open');
+			assert(null !== input.getAttribute('aria-activedescendant'), 'T7 fixture did not establish an active descendant');
+			return { h, input, panel };
+		}
+		const mouseup = await openPanel();
+		mouseup.h.dispatch(mouseup.panel, 'mousedown', { button: 0 });
+		mouseup.h.dispatch(mouseup.input, 'focusout', { relatedTarget: null });
+		assert(false === mouseup.panel.hidden, 'T7 panel collapsed while the pointer was inside');
+		assert('true' === mouseup.input.getAttribute('aria-expanded'), 'T7 cleared aria-expanded while the pointer was inside');
+		mouseup.h.dispatch(mouseup.h.document, 'mouseup');
+		mouseup.h.dispatch(mouseup.input, 'focusout', { relatedTarget: null });
+		assert(mouseup.panel.hidden, 'T7 panel stayed open after mouseup cleared the pointer flag');
+		assert('false' === mouseup.input.getAttribute('aria-expanded'), 'T7 left aria-expanded true after mouseup cleared the pointer flag');
+
+		const click = await openPanel();
+		click.h.dispatch(click.panel, 'mousedown', { button: 0 });
+		click.h.dispatch(click.input, 'focusout', { relatedTarget: null });
+		assert(false === click.panel.hidden, 'T7 panel collapsed before click cleared the pointer flag');
+		click.h.dispatch(click.panel, 'click');
+		click.h.dispatch(click.input, 'focusout', { relatedTarget: null });
+		assert(click.panel.hidden, 'T7 panel stayed open after click cleared the pointer flag');
+	}],
+	['T8 popup form focusout collapses the panel and leaves the popup open', async () => {
+		const h = createHarness({ formCount: 0, popup: true, triggerCount: 1 });
+		h.triggers[0].click();
+		h.advanceTimers(30);
+		assert(false === h.popup.root.hidden, 'T8 popup did not open');
+		assert(h.document.documentElement.classList.contains('ys-ss-noscroll'), 'T8 popup did not set ys-ss-noscroll');
+		assert(h.document.activeElement === h.popup.input, 'T8 popup did not focus its search input');
+		h.popup.input.value = 'nova';
+		h.dispatch(h.popup.input, 'input');
+		h.advanceTimers(250);
+		await h.resolveJson(1, threeResults());
+		assert(false === h.popup.panel.hidden, 'T8 popup suggestion panel did not open');
+		h.dispatch(h.popup.input, 'focusout', { relatedTarget: h.popup.close });
+		assert(h.popup.panel.hidden, 'T8 focusout to the close button did not hide the panel');
+		assert('false' === h.popup.input.getAttribute('aria-expanded'), 'T8 focusout to the close button did not set aria-expanded=false');
+		assert(false === h.popup.root.hidden, 'T8 collapsed the popup');
+		assert(h.document.documentElement.classList.contains('ys-ss-noscroll'), 'T8 removed ys-ss-noscroll');
+	}],
+	['T9 middle-button mousedown on an option is not cancelled', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		const option = panel.querySelector('.ys-ss-item');
+		assert(option, 'T9 result option is missing');
+		const down = h.dispatch(option, 'mousedown', { button: 1 });
+		assert(false === down.defaultPrevented, 'T9 middle-button mousedown was cancelled');
+		assert(false === panel.hidden, 'T9 middle-button mousedown hid the panel');
+		assert(h.document.activeElement === input, 'T9 middle-button mousedown left the search input');
 	}],
 	['Escape clears active descendant and collapses the combobox', async () => {
 		const h = createHarness();
