@@ -285,6 +285,12 @@ runTests([
 		check(outsideA.panel.hidden, 'scenario A late response reopened the panel');
 		check('false' === outsideA.input.getAttribute('aria-expanded'), 'scenario A late response set aria-expanded');
 		check(outsideA.form._ysSsLogProof && 'receipt-nova' === outsideA.form._ysSsLogProof.receipt, 'scenario A late response dropped the search proof');
+		outsideA.h.document.body.focus();
+		outsideA.input.focus();
+		check(2 === outsideA.h.pendingFetches.length, 'refocus after collapse did not start a new query');
+		await outsideA.h.resolveJson(1, threeResults());
+		check(false === outsideA.panel.hidden, 'refocus after collapse did not reopen the panel');
+		check('true' === outsideA.input.getAttribute('aria-expanded'), 'refocus after collapse left aria-expanded false');
 
 		const outsideB = (() => {
 			const h = createHarness();

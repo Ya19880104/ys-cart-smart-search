@@ -156,7 +156,8 @@
 				activeIndex: -1,
 				settleTimer: null,
 				suppressFocus: false,
-				pointerInPanel: false
+				pointerInPanel: false,
+				collapsed: false
 			};
 		}
 		return form._ysSsController;
@@ -172,6 +173,7 @@
 
 	function beginInteraction(form, mode) {
 		var state = controller(form);
+		state.collapsed = false;
 		clearServerLogReceipt(form);
 		state.generation += 1;
 		state.mode = mode;
@@ -199,11 +201,12 @@
 		beginInteraction(form, 'closed');
 	}
 
-	/** 只收起建議面板。不碰 proof、收據欄位與停頓計時器。 */
+	/** 只收起建議面板。不碰 proof、收據欄位與停頓計時器。已收起時，晚到的回應不得再開。 */
 	function collapsePanel(form) {
 		var input = form.querySelector('.ys-ss-input');
 		var panel = form.querySelector('.ys-ss-panel');
 		var state = controller(form);
+		state.collapsed = true;
 		state.activeIndex = -1;
 		if (input) {
 			input.setAttribute('aria-expanded', 'false');
@@ -364,6 +367,7 @@
 			item.setAttribute('role', 'option');
 			item.setAttribute('aria-selected', 'false');
 		});
+		if (state.collapsed) { visible = false; }
 		panel.hidden = !visible;
 		if (visible) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', 'hidden'); }
 		input.setAttribute('aria-expanded', visible ? 'true' : 'false');
