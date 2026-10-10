@@ -89,14 +89,21 @@ class NodeStub {
 		event = event || {};
 		event.type = event.type || '';
 		event.target = event.target || this;
-		event.currentTarget = this;
 		event.defaultPrevented = false;
 		event.preventDefault = event.preventDefault || function () { this.defaultPrevented = true; };
 		event.stopPropagation = event.stopPropagation || function () { this._stopped = true; };
-		(this.listeners[event.type] || []).slice().forEach((callback) => callback(event));
-		if (!event._stopped && this.ownerDocument && this !== this.ownerDocument) {
-			this.ownerDocument._dispatchBubbled(event);
+		const path = [];
+		let node = this;
+		while (node) {
+			path.push(node);
+			if (node === node.ownerDocument) { break; }
+			node = node.parentNode;
 		}
+		path.forEach((current) => {
+			if (event._stopped) { return; }
+			event.currentTarget = current;
+			(current.listeners[event.type] || []).slice().forEach((callback) => callback(event));
+		});
 		return !event.defaultPrevented;
 	}
 	setAttribute(name, value) {

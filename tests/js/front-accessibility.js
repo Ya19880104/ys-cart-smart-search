@@ -55,6 +55,66 @@ runTests([
 		h.dispatch(input, 'keydown', { key: 'Enter' });
 		assert(0 === options[0].clickCount && 1 === options[1].clickCount && 0 === options[2].clickCount, 'Enter did not activate only the current option');
 	}],
+	['T1 focus leaving the form collapses the open suggestion panel', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		const outside = h.document.createElement('button');
+		outside.type = 'button';
+		h.document.body.appendChild(outside);
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		h.dispatch(input, 'keydown', { key: 'ArrowDown' });
+		assert(null !== input.getAttribute('aria-activedescendant'), 'T1 fixture did not establish an active descendant');
+		h.dispatch(input, 'focusout', { relatedTarget: outside });
+		assert(panel.hidden, 'T1 external focusout did not hide the panel');
+		assert('false' === input.getAttribute('aria-expanded'), 'T1 external focusout did not set aria-expanded=false');
+		assert(null === input.getAttribute('aria-activedescendant'), 'T1 external focusout kept aria-activedescendant');
+		outside.focus();
+		input.focus();
+		await h.resolveJson(1, threeResults());
+		h.dispatch(input, 'keydown', { key: 'ArrowDown' });
+		h.dispatch(input, 'focusout', { relatedTarget: null });
+		assert(panel.hidden, 'T1 null relatedTarget did not hide the panel');
+		assert('false' === input.getAttribute('aria-expanded'), 'T1 null relatedTarget did not set aria-expanded=false');
+		assert(null === input.getAttribute('aria-activedescendant'), 'T1 null relatedTarget kept aria-activedescendant');
+	}],
+	['T2 focusout inside the form keeps the suggestion panel open', async () => {
+		const h = createHarness();
+		const { input, panel, submit } = h.forms[0];
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		h.dispatch(input, 'keydown', { key: 'ArrowDown' });
+		const activeId = input.getAttribute('aria-activedescendant');
+		assert(null !== activeId, 'T2 fixture did not establish an active descendant');
+		h.dispatch(input, 'focusout', { relatedTarget: submit });
+		assert(false === panel.hidden, 'T2 in-form focusout hid the panel');
+		assert('true' === input.getAttribute('aria-expanded'), 'T2 in-form focusout cleared aria-expanded');
+		assert(activeId === input.getAttribute('aria-activedescendant'), 'T2 in-form focusout cleared aria-activedescendant');
+	}],
+	['T3 mousedown on an option activates it without leaving the input', async () => {
+		const h = createHarness();
+		const { input, panel } = h.forms[0];
+		input.value = 'nova';
+		input.focus();
+		await h.resolveJson(0, threeResults());
+		const option = panel.querySelector('[role="option"]');
+		assert(option && ('A' === option.tagName || 'BUTTON' === option.tagName), 'T3 option is not a focusable anchor or button');
+		const down = h.dispatch(option, 'mousedown', { button: 0 });
+		let hiddenBeforeClick = panel.hidden;
+		if (!down.defaultPrevented) {
+			h.dispatch(input, 'focusout', { relatedTarget: option });
+			hiddenBeforeClick = panel.hidden;
+			option.focus();
+		}
+		assert(false === hiddenBeforeClick, 'T3 panel collapsed before the option click');
+		option.click();
+		assert(1 === option.clickCount, 'T3 option click was not activated');
+		assert(h.document.activeElement === input, 'T3 focus left the search input');
+		assert(false === panel.hidden, 'T3 panel was closed when the option activated');
+		assert('true' === input.getAttribute('aria-expanded'), 'T3 collapsed aria-expanded before activation');
+	}],
 	['Escape clears active descendant and collapses the combobox', async () => {
 		const h = createHarness();
 		const { input, panel } = h.forms[0];
