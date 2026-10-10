@@ -551,6 +551,18 @@
 			renderPanelState(form, state.mode, { selectionOnly: true });
 		});
 
+		// 焦點離開整個搜尋表單才收起。relatedTarget 在表單內（例如 Tab 到送出鈕，或 null 以外的表單內節點）保持開啟。
+		form.addEventListener('focusout', function (event) {
+			var next = event.relatedTarget;
+			if (next && form.contains(next)) { return; }
+			closeInteraction(form);
+		});
+
+		// 結果與熱門詞是可聚焦的 <a>/<button>。mousedown 先擋下預設動作，焦點才會留在輸入框，隨後的 click 不會落空。
+		panel.addEventListener('mousedown', function (event) {
+			event.preventDefault();
+		});
+
 		document.addEventListener('click', function (event) {
 			if (event._ysSsActivationOwner === form) { return; }
 			if (!form.contains(event.target)) {
