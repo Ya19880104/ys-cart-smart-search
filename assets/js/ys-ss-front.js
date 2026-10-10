@@ -155,7 +155,8 @@
 				activeRequest: null,
 				activeIndex: -1,
 				settleTimer: null,
-				suppressFocus: false
+				suppressFocus: false,
+				pointerInPanel: false
 			};
 		}
 		return form._ysSsController;
@@ -196,6 +197,22 @@
 
 	function closeInteraction(form) {
 		beginInteraction(form, 'closed');
+	}
+
+	/** 只收起建議面板。不碰 proof、收據欄位與停頓計時器。 */
+	function collapsePanel(form) {
+		var input = form.querySelector('.ys-ss-input');
+		var panel = form.querySelector('.ys-ss-panel');
+		var state = controller(form);
+		state.activeIndex = -1;
+		if (input) {
+			input.setAttribute('aria-expanded', 'false');
+			input.removeAttribute('aria-activedescendant');
+		}
+		if (panel) {
+			panel.hidden = true;
+			panel.setAttribute('hidden', 'hidden');
+		}
 	}
 
 	function renderFailure(form) {
@@ -551,19 +568,36 @@
 			renderPanelState(form, state.mode, { selectionOnly: true });
 		});
 
-		// 焦點離開整個搜尋表單才收起。relatedTarget 在表單內（例如 Tab 到送出鈕，或 null 以外的表單內節點）保持開啟。
+		// 焦點離開整個搜尋表單只收起面板。proof、收據與停頓計時器留給 Escape 與點外面的 closeInteraction()。
+		// relatedTarget 在表單內（例如 Tab 到送出鈕）不收。relatedTarget 為 null 且指標仍在面板內（拖捲動條）也不收。
 		form.addEventListener('focusout', function (event) {
 			var next = event.relatedTarget;
 			if (next && form.contains(next)) { return; }
-			closeInteraction(form);
+			if (!next && controller(form).pointerInPanel) { return; }
+			collapsePanel(form);
 		});
 
-		// 結果與熱門詞是可聚焦的 <a>/<button>。mousedown 先擋下預設動作，焦點才會留在輸入框，隨後的 click 不會落空。
+		// 可選項目的左鍵 mousedown 擋下預設動作，焦點才留在輸入框，隨後的 click 不會落空。
+		// 面板背景、捲動條與非左鍵不擋；任何按鍵的 mousedown 都先記下指標在面板內。
 		panel.addEventListener('mousedown', function (event) {
+			controller(form).pointerInPanel = true;
+			if (0 !== event.button) { return; }
+			var target = event.target;
+			if (target && 3 === target.nodeType) { target = target.parentNode; }
+			var selectable = null;
+			if (target && 'function' === typeof target.closest) {
+				selectable = target.closest('.ys-ss-item') || target.closest('.ys-ss-chip') || target.closest('.ys-ss-viewall');
+			}
+			if (!selectable || !panel.contains(selectable)) { return; }
 			event.preventDefault();
 		});
 
+		document.addEventListener('mouseup', function () {
+			controller(form).pointerInPanel = false;
+		});
+
 		document.addEventListener('click', function (event) {
+			controller(form).pointerInPanel = false;
 			if (event._ysSsActivationOwner === form) { return; }
 			if (!form.contains(event.target)) {
 				closeInteraction(form);
